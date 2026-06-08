@@ -1,86 +1,61 @@
-# World Cup 2026 Portfolio Challenge — Auction MVP
+# World Cup 2026 Portfolio Challenge — v3B UX + Trading Upgrade
 
-This is a lightweight web app MVP for a live office auction. It uses React + Vite + Firebase Realtime Database.
+This version includes the v3A UX upgrade plus functional trading.
 
-## Included features
+## Included
 
-- Username-only entry, no password
-- Admin user: enter username `admin`
-- 45 starting credits per participant
-- ESPN pre-tournament rank field for 48 countries
-- Scheduled auction order with 5-minute country windows
-- Live auction room
-- Bids cannot exceed remaining credits
-- Commissioner can start, pause, skip, and sell lots
-- Winning bid deducts credits through derived portfolio accounting
-- Portfolio page
-- Leaderboard: points, spent, remaining, profit
-- Manual scoring admin: add points to a country
+- Better live auction room
+- Mobile-friendly auction, schedule, portfolio, and leaderboard layouts
+- Auction Schedule tab
+- Matches tab with read-only World Cup match schedule
+- View other players' portfolios
+- Portfolio ownership shares
+- Trading tab
+- Trade proposals
+- Incoming trade inbox with accept/reject
+- Outgoing trade list with cancel option
+- Admin final approval before a trade executes
+- Completed trade log
+- 1% country share increments
+- Credits included in trades
+- Credit accounting after the auction
 
-## Not included yet
+## Trading rules implemented
 
-- ESPN automatic match result pull
-- Fractional 1% trades
-- Commissioner trade approval workflow
-- Full ownership ledger / audit log
+- Countries can be traded in whole-number percentages, minimum 1%.
+- Trades can include country shares and/or credits.
+- Each side must send at least one item.
+- A user cannot send more credits than they currently have.
+- A user cannot send more country share than they currently own.
+- A proposed trade must be accepted by the counterparty.
+- Accepted trades must be approved by `admin` before shares or credits move.
+- Credits received in trades reduce net credits spent.
+- Credits sent in trades increase net credits spent.
+- Profit = points earned - net credits spent.
 
-These are intended for v1.1 after the auction MVP works.
+## Firebase paths added
 
-## Setup
+This update is backward-compatible with existing auction data. It adds these paths only when trades happen:
 
-1. Install Node.js.
-2. Unzip this folder.
-3. Run:
+- `trades`
+- `creditAdjustments`
+- `schedule/{countryLot}/shares` for fractional ownership
 
-```bash
-npm install
-```
+Existing participants, bids, sold countries, scores, and schedules are not cleared or reset by installing this update.
 
-4. Create a Firebase project: https://console.firebase.google.com
-5. Add a Web App in Firebase.
-6. Create a Realtime Database in test mode.
-7. Copy your Firebase config into `src/firebase.js`.
-8. Run locally:
+## Important
 
-```bash
-npm run dev
-```
+Do not replace your working `src/firebase.js` unless you are ready to paste your real Firebase config back in.
 
-9. Open the local URL shown by Vite.
+## v3C Access + Welcome Patch
 
-## Deploy to a URL using Vercel
+This package includes the v3B UX + Trading upgrade plus these additional patches:
 
-1. Create a GitHub repo and upload these files.
-2. Create a free Vercel account.
-3. Import the GitHub repo into Vercel.
-4. Framework preset: Vite.
-5. Build command: `npm run build`.
-6. Output directory: `dist`.
-7. Deploy.
+- Admin navigation and admin page are visible only to the `admin` user / admin role.
+- Non-admin users cannot render the Admin page even if they previously had that tab open.
+- Login is now a participant dropdown. Users select their existing name instead of typing a new username.
+- Self-registration through the login screen is disabled, which prevents accidental duplicate users.
+- A Welcome tab was added with the concise league format, scoring rules, profit formula, and trading explanation.
+- The existing Firebase data structure is preserved. No reset is required.
 
-## First use
-
-1. Visit the site.
-2. Enter username `admin`.
-3. Go to Admin.
-4. Set the draft start time and click **Initialize / Reset Schedule**.
-5. Add participants, or let participants join by entering their usernames.
-6. Go to Auction.
-7. Start the first lot.
-8. Participants bid from their own phones/laptops.
-9. Admin clicks **Sell to high bidder**.
-
-## Firebase Realtime Database Rules for MVP testing
-
-For quick MVP testing only, you can use open rules:
-
-```json
-{
-  "rules": {
-    ".read": true,
-    ".write": true
-  }
-}
-```
-
-Do not use these rules for a public production app.
+Important: keep your working `src/firebase.js` file. Do not replace it when applying this update.
