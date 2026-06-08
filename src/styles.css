@@ -153,3 +153,31 @@ button.wide { width:100%; }
 .formula-card { display:grid; gap:4px; background:#0b1f3a; color:white; padding:16px; border-radius:16px; margin-bottom:12px; }
 .formula-card span { opacity:.72; font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }
 .formula-card b { font-size:20px; }
+
+/* v3D additions */
+.max-bid-notice {
+  margin-top: 10px;
+  border-left: 4px solid #f59e0b;
+}
+.score-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  font-weight: 700;
+}
+.results-admin-box {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.78);
+  margin: 10px 0 18px;
+}
+.results-admin-box select,
+.results-admin-box input {
+  width: 100%;
+}
