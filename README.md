@@ -59,3 +59,24 @@ This package includes the v3B UX + Trading upgrade plus these additional patches
 - The existing Firebase data structure is preserved. No reset is required.
 
 Important: keep your working `src/firebase.js` file. Do not replace it when applying this update.
+
+
+## v3D additions
+
+This package includes the v3C access/welcome/trading update plus:
+
+- Full 104-match tournament schedule framework in the Matches tab.
+- Results fields on the Matches page.
+- Admin-only Results Admin controls for entering final scores, saving scoring-pending results, and applying match points.
+- Country trade status controls: active/tradable, temporarily locked, and eliminated.
+- Trading validation that blocks eliminated or temporarily locked teams.
+- Trade timing metadata: approvedAt and effectiveAt are saved on approved trades.
+- Auction max-bid indicator: if the current high bid cannot be beaten by available remaining credits, the Auction page shows a clear warning.
+
+Important: this update is backward-compatible with existing Firebase league data. Do not replace src/firebase.js when installing.
+
+## v3D Schedule Patch
+
+This patch replaces group-stage TBD placeholders with the full known group-stage match list through June 27. Knockout-stage teams remain placeholders until the tournament bracket is known.
+
+Match times are displayed in Eastern Time for consistency with the ESPN-style schedule display used in the app.
