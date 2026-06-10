@@ -1,43 +1,14 @@
-# World Cup 2026 Portfolio Challenge — v3D Post-Draft Cleanup + ESPN Schedule Sync
+# World Cup 2026 Portfolio Challenge — v3E
 
-This package builds on the v3C Access + Welcome + Trading version.
+This version adds the public ESPN refresh and duplicate-proof scoring framework.
 
-## Included in v3D
+## Keep your existing Firebase config
 
-- Leaderboard excludes the `admin` commissioner account.
-- Leaderboard columns are reordered to:
-  1. Profit
-  2. Points
-  3. Net Spent
-  4. Auction Spend
-  5. Trade Credits
-  6. Remaining
-  7. Holdings
-- Existing number formatting is preserved:
-  - whole numbers display as whole numbers
-  - fractional points/profit display to two decimals
-- Country Ownership page added.
-- Admin country sale correction tool added.
-- Admin trading Open/Closed setting added.
-- Trading tab respects the Open/Closed setting.
-- ESPN schedule sync phase 1 added:
-  - Admin button: Sync ESPN Schedule
-  - Vercel API function: `api/espn-schedule.js`
-  - Imported schedule saves to Firebase under `matches`
-  - Sync metadata saves to Firebase under `syncMeta`
-  - Matches page uses ESPN-synced schedule if available, otherwise falls back to the seeded schedule
+When installing this update, do **not** replace your existing `src/firebase.js` file if your live app is already connected to Firebase.
 
-## What ESPN sync does NOT do yet
+## Files changed in this update
 
-This update does not award points, change standings, or auto-score matches.
-
-The ESPN sync is schedule-only/admin-review-only. Scoring automation should come after imported match data is verified.
-
-## Important install notes
-
-Do not replace your working `src/firebase.js` file. Keep the Firebase config file you already fixed.
-
-Upload/update these files in GitHub:
+Upload these files to GitHub:
 
 - `src/main.jsx`
 - `src/styles.css`
@@ -45,15 +16,91 @@ Upload/update these files in GitHub:
 - `api/espn-schedule.js`
 - `README.md`
 
-Do not upload:
+## v3E scope included
 
-- `node_modules`
-- a broken/placeholder `src/firebase.js`
+### Matches tab
 
-## Local testing note
+- Adds a public `Refresh ESPN Match Data` button on the Matches tab.
+- Any logged-in user can refresh ESPN match data for everyone.
+- Adds a 60-second cooldown.
+- Shows `Last synced: 2:14 PM by Taylor` style status.
+- Shows match status as:
+  - `Not Started`
+  - live minute such as `34'`
+  - `Final`
+- Shows match scores.
 
-The ESPN sync button depends on the Vercel serverless API route at `/api/espn-schedule`. Depending on your local setup, that route may only work after deployment to Vercel. If local testing shows an ESPN sync error but the rest of the app works, deploy the `api` folder and test the sync on the live Vercel URL.
+### Scoring ledger
 
-## Data safety
+- Adds duplicate-proof scoring events under `scoringEvents` in Firebase.
+- Match scoring uses stable event IDs so a match cannot score twice.
+- Leaderboard points now include active scoring ledger events.
+- Existing direct country `points` values still count as legacy/manual points.
 
-This update is designed to be additive/backward-compatible. It does not require clearing Firebase, resetting the auction schedule, or changing existing participants/auction records.
+### Automatic match scoring
+
+When ESPN marks a match as Final:
+
+- Group-stage win = +3.
+- Group-stage draw = +1 for each country.
+- Knockout wins are scored by round:
+  - Round of 32 = +5
+  - Round of 16 = +9
+  - Quarterfinal = +15
+  - Semifinal = +22
+  - Final = +34
+- Knockout scoring relies on ESPN winner indicator.
+- If a knockout match is tied and no winner is found, the match is flagged for admin review instead of being scored.
+
+### Trade-aware scoring
+
+- Before scoring a final match, the app checks accepted trades awaiting admin approval involving either country in the match.
+- If such a trade was accepted before the match was observed final, match scoring is blocked.
+- Those countries are temporarily suspended from new trades until points are applied.
+- Admin can resolve trades, then score the pending match.
+
+### Admin scoring controls
+
+- Adds a pending match scoring queue.
+- Adds manual result / scoring override.
+- Adds auditable manual scoring adjustments.
+- Adds group winner selector, max 12 teams.
+- Adds advanced-from-group selector, max 32 teams.
+- Manual advanced-from-group override supersedes ESPN auto-detect.
+- ESPN auto-detect can award advanced-from-group points from Round of 32 schedule entries when real countries appear.
+- Duplicate group winner / advanced points are prevented.
+
+## Install notes
+
+1. Copy the changed files into your local app folder.
+2. Keep your existing `src/firebase.js`.
+3. Run local check:
+
+```bash
+npm run dev
+```
+
+4. If it loads locally, upload the changed files to GitHub.
+5. Wait for Vercel to deploy.
+6. Test the live site.
+
+## Live test checklist
+
+1. Site loads.
+2. Login works.
+3. Leaderboard still excludes `admin`.
+4. Leaderboard column order is unchanged from v3D.
+5. Matches tab shows the public refresh button.
+6. Click refresh once and confirm match statuses/scores appear.
+7. Confirm leaderboard does not unexpectedly change unless a match is Final and eligible for scoring.
+8. Confirm Admin tab shows:
+   - Pending Match Scoring
+   - Manual result / scoring override
+   - Group winner selector
+   - Advanced-from-group selector
+   - Scoring ledger
+9. Confirm Trading tab blocks countries with pending unscored match points.
+
+## Important scoring rule
+
+A trade affects a match only if both participants accepted it and it reached admin approval before the match was observed as Final. If such a pending trade exists, the app blocks scoring until admin resolves the trade.
