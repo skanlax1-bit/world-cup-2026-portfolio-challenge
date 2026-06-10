@@ -20,8 +20,10 @@ import {
   History,
   ShieldCheck,
   BookOpen,
-  Lock,
-  ClipboardCheck
+  Globe2,
+  Download,
+  AlertTriangle,
+  Save
 } from "lucide-react";
 import { db } from "./firebase";
 import { countries, buildDefaultSchedule } from "./countries";
@@ -31,16 +33,6 @@ import "./styles.css";
 const LEAGUE_ID = "defaultLeague";
 const STARTING_CREDITS = 45;
 const TIMER_SECONDS = 5 * 60;
-
-const STAGE_POINTS = {
-  "Group Stage": { win: 3, draw: 1 },
-  "Round of 32": { win: 5 },
-  "Round of 16": { win: 9 },
-  "Quarterfinal": { win: 15 },
-  "Semifinal": { win: 22 },
-  "Final": { win: 34 }
-};
-const KNOCKOUT_STAGES = new Set(["Round of 32", "Round of 16", "Quarterfinal", "Semifinal", "Final"]);
 
 const leagueRoot = () => ref(db, `leagues/${LEAGUE_ID}`);
 const dbPath = (p) => ref(db, `leagues/${LEAGUE_ID}/${p}`);
@@ -93,25 +85,26 @@ function cleanShares(shares) {
   return cleaned;
 }
 
+function participantName(participants, id) {
+  return participants.find((p) => p.id === id)?.name || id || "—";
+}
+
+function getActiveMatches(matchesObj) {
+  const imported = normalizeObj(matchesObj).sort((a, b) => String(a.dateTime || a.date || "").localeCompare(String(b.dateTime || b.date || "")));
+  return imported.length ? imported : worldCupMatches;
+}
+
+function groupMatchesByDate(matches) {
+  return matches.reduce((acc, match) => {
+    const label = match.displayDate || (match.dateTime ? new Date(match.dateTime).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : match.date || "Unscheduled");
+    acc[label] = acc[label] || [];
+    acc[label].push(match);
+    return acc;
+  }, {});
+}
+
 function getLotShareForParticipant(lot, participantId) {
   return Number(getLotShares(lot)[participantId] || 0);
-}
-
-function getCountryStatus(countryStatusObj, countryName) {
-  const key = slug(countryName || "");
-  return countryStatusObj?.[key] || { status: "active", eliminated: false, tradingLocked: false };
-}
-
-function isCountryTradeLocked(countryStatusObj, countryName) {
-  const status = getCountryStatus(countryStatusObj, countryName);
-  return Boolean(status.eliminated || status.tradingLocked || status.status === "eliminated" || status.status === "locked");
-}
-
-function tradeLockMessage(countryStatusObj, countryName) {
-  const status = getCountryStatus(countryStatusObj, countryName);
-  if (status.eliminated || status.status === "eliminated") return `${countryName} is eliminated and cannot be traded.`;
-  if (status.tradingLocked || status.status === "locked") return `${countryName} is temporarily locked while a result/scoring update is pending.`;
-  return "";
 }
 
 function getLotPointsForParticipant(lot, participantId) {
@@ -239,6 +232,7 @@ function Header({ page, setPage, user, onLogout, isAdmin }) {
     ["schedule", "Auction Schedule", ListChecks],
     ["matches", "Matches", CalendarDays],
     ["portfolio", "Portfolios", Wallet],
+    ["ownership", "Ownership", Users],
     ["leaderboard", "Leaderboard", BarChart3],
     ["trading", "Trading", ArrowLeftRight],
     ...(isAdmin ? [["admin", "Admin", Settings]] : [])
@@ -369,11 +363,6 @@ function Auction({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
   const minBid = Math.max(1, Number(currentHigh?.amount || 0) + 1);
   const bidNumber = Number(bid || 0);
   const canBid = currentLot?.status === "live" && auctionStatus === "live" && bidNumber >= minBid && bidNumber <= Number(me.remaining || 0) && currentHigh?.participantId !== user.id;
-  const highestAvailableCredit = participants.reduce((max, p) => Math.max(max, Number(p.remaining || 0)), 0);
-  const highestAvailableOtherCredit = participants
-    .filter((p) => p.id !== currentHigh?.participantId)
-    .reduce((max, p) => Math.max(max, Number(p.remaining || 0)), 0);
-  const maxBidReached = Boolean(currentHigh && Number(currentHigh.amount || 0) >= highestAvailableOtherCredit);
   const nextLots = lots.filter((l) => l.status === "upcoming" && l.id !== currentLot?.id).slice(0, 6);
   const soldLots = lots.filter((l) => l.status === "sold").slice(-6).reverse();
 
@@ -468,7 +457,6 @@ function Auction({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
               <StatCard label="Time left" value={formatTimer(secondsLeft)} sub={auctionStatus === "paused" ? "Paused" : "5-minute lot"} tone="timer" />
               <StatCard label="High bid" value={currentHigh ? `${currentHigh.amount}` : "—"} sub={currentHigh ? currentHigh.participantName : "No bids yet"} />
               <StatCard label="Your credits" value={money(me.remaining)} sub={`Max bid allowed: ${money(me.remaining)}`} />
-              <StatCard label="Max room bid" value={money(highestAvailableCredit)} sub={maxBidReached ? "Current high bid cannot be beaten by available credits" : "Highest credits currently available"} />
             </div>
 
             <div className="bid-panel">
@@ -482,9 +470,6 @@ function Auction({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
                 <button className="secondary" onClick={() => setBid(Number(currentHigh?.amount || 0) + 5)} disabled={Number(currentHigh?.amount || 0) + 5 > me.remaining}>+5</button>
                 <button className="secondary" onClick={() => setBid(me.remaining)} disabled={me.remaining < minBid}>Max {money(me.remaining)}</button>
               </div>
-              {maxBidReached && currentLot.status === "live" && currentHigh && (
-                <div className="notice max-bid-notice"><b>Max bid reached:</b> {currentHigh.participantName} has bid {money(currentHigh.amount)}. No participant currently has enough remaining credits to beat this bid. Admin can sell early or let the timer run.</div>
-              )}
               {currentLot.status !== "live" && <p className="muted">This lot has not started yet. The commissioner must start the auction window.</p>}
               {currentLot.status === "live" && auctionStatus === "paused" && <p className="muted">Bidding is paused. Wait for the commissioner to resume.</p>}
               {currentLot.status === "live" && auctionStatus === "live" && !canBid && (
@@ -587,50 +572,45 @@ function AuctionSchedule({ scheduleObj }) {
   );
 }
 
-function Matches({ matchResultsObj = {}, countryStatusObj = {} }) {
-  const grouped = useMemo(() => {
-    return worldCupMatches.reduce((acc, match) => {
-      acc[match.displayDate] = acc[match.displayDate] || [];
-      acc[match.displayDate].push(match);
-      return acc;
-    }, {});
-  }, []);
-
-  function resultFor(match) {
-    return matchResultsObj?.[match.id] || {};
-  }
-
-  function displayScore(match) {
-    const result = resultFor(match);
-    if (result.status === "final") return `${result.homeScore} - ${result.awayScore}`;
-    if (result.status === "pending") return "Final · scoring pending";
-    return "—";
-  }
+function Matches({ matchesObj, syncMetaObj }) {
+  const matches = useMemo(() => getActiveMatches(matchesObj), [matchesObj]);
+  const usingImported = normalizeObj(matchesObj).length > 0;
+  const grouped = useMemo(() => groupMatchesByDate(matches), [matches]);
 
   return (
     <div className="container grid">
       <div className="card page-title">
         <p className="eyebrow">World Cup match calendar</p>
         <h2>Matches</h2>
-        <p className="muted">Full tournament schedule framework with results fields. Admin can enter final scores and apply scoring from the Admin tab. Knockout opponents may remain TBD until the bracket is known.</p>
+        <p className="muted">Match schedule with date, time, matchup, venue, and stage. ESPN schedule sync is available from Admin; scoring automation will be added after schedule import is verified.</p>
+        <div className="sync-meta-row">
+          <span className={`badge ${usingImported ? "positive" : "neutral"}`}>{usingImported ? "Using synced ESPN schedule" : "Using seeded schedule"}</span>
+          {syncMetaObj?.lastScheduleSyncAt && <span className="muted small-text">Last ESPN sync: {new Date(syncMetaObj.lastScheduleSyncAt).toLocaleString()}</span>}
+          {syncMetaObj?.scheduleSyncError && <span className="badge dangerish">Last sync warning</span>}
+        </div>
       </div>
+
+      {syncMetaObj?.unmatchedTeams?.length > 0 && (
+        <div className="card warning-card">
+          <h3><AlertTriangle size={18}/> ESPN team mapping warnings</h3>
+          <p className="muted">These ESPN team names did not cleanly map to app countries. Review before using imported data for scoring.</p>
+          <div className="tag-row">{syncMetaObj.unmatchedTeams.map((team) => <span className="badge neutral" key={team}>{team}</span>)}</div>
+        </div>
+      )}
+
       <div className="grid">
         {Object.entries(grouped).map(([date, matches]) => (
           <div className="card" key={date}>
             <h3>{date}</h3>
             <table className="desktop-table">
-              <thead><tr><th>Time</th><th>Match</th><th>Venue</th><th>Stage</th><th>Result</th></tr></thead>
-              <tbody>{matches.map((m) => {
-                const homeStatus = getCountryStatus(countryStatusObj, m.home);
-                const awayStatus = getCountryStatus(countryStatusObj, m.away);
-                return <tr key={m.id}><td>{m.time}</td><td><b>{m.home}</b> vs <b>{m.away}</b></td><td>{m.venue}</td><td>{m.stage}</td><td><span className="score-pill">{displayScore(m)}</span>{(homeStatus.eliminated || awayStatus.eliminated) && <small className="muted"> · elimination tracked</small>}</td></tr>;
-              })}</tbody>
+              <thead><tr><th>Time</th><th>Match</th><th>Venue</th><th>Stage</th></tr></thead>
+              <tbody>{matches.map((m) => <tr key={m.id || m.espnEventId}><td>{m.time || fmtTime(m.dateTime)}</td><td><b>{m.home}</b> vs <b>{m.away}</b></td><td>{m.venue || "—"}</td><td>{m.stage || "Group Stage"}</td></tr>)}</tbody>
             </table>
             <div className="mobile-cards">
               {matches.map((m) => (
-                <div className="mini-card" key={m.id}>
-                  <div className="space"><b>{m.home} vs {m.away}</b><span className="badge neutral">{m.stage}</span></div>
-                  <div className="mini-grid"><span>Time</span><b>{m.time}</b><span>Venue</span><b>{m.venue}</b><span>Result</span><b>{displayScore(m)}</b></div>
+                <div className="mini-card" key={m.id || m.espnEventId}>
+                  <div className="space"><b>{m.home} vs {m.away}</b><span className="badge neutral">{m.stage || "Group Stage"}</span></div>
+                  <div className="mini-grid"><span>Time</span><b>{m.time || fmtTime(m.dateTime)}</b><span>Venue</span><b>{m.venue || "—"}</b></div>
                 </div>
               ))}
             </div>
@@ -723,27 +703,70 @@ function Portfolio({ user, participantsObj, scheduleObj, creditAdjustmentsObj })
   );
 }
 
-function Leaderboard({ participantsObj, scheduleObj, creditAdjustmentsObj }) {
-  const { participants } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj), [participantsObj, scheduleObj, creditAdjustmentsObj]);
-  const sorted = [...participants].sort((a, b) => Number(b.profit || 0) - Number(a.profit || 0) || Number(b.points || 0) - Number(a.points || 0));
+function CountryOwnership({ participantsObj, scheduleObj, creditAdjustmentsObj }) {
+  const { participants, lots } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj), [participantsObj, scheduleObj, creditAdjustmentsObj]);
+  const soldLots = lots.filter((l) => l.status === "sold").sort((a, b) => Number(a.rank || a.order || 0) - Number(b.rank || b.order || 0));
 
   return (
     <div className="container grid">
       <div className="card page-title">
-        <p className="eyebrow">Standings</p>
+        <p className="eyebrow">Country ownership</p>
+        <h2>Ownership Snapshot</h2>
+        <p className="muted">Every sold country should total 100% ownership. This page is the fastest way to confirm auction corrections and completed trades.</p>
+      </div>
+      <div className="card table-card">
+        {soldLots.length ? (
+          <>
+            <table className="desktop-table">
+              <thead><tr><th>ESPN Rank</th><th>Country</th><th>Owners</th><th>Auction Winner</th><th>Auction Price</th><th>Points</th></tr></thead>
+              <tbody>{soldLots.map((lot) => {
+                const shares = getLotShares(lot);
+                const total = Object.values(shares).reduce((sum, share) => sum + Number(share || 0), 0);
+                return <tr key={lot.id}><td>{lot.rank}</td><td><b>{lot.country}</b></td><td>{Object.entries(shares).map(([id, share]) => `${participantName(participants, id)} ${money(share)}%`).join(", ") || "—"} {Math.round(total) !== 100 && <span className="badge dangerish">Totals {money(total)}%</span>}</td><td>{lot.winningBidder || "—"}</td><td>{money(lot.finalPrice)}</td><td>{money(lot.points)}</td></tr>;
+              })}</tbody>
+            </table>
+            <div className="mobile-cards">
+              {soldLots.map((lot) => {
+                const shares = getLotShares(lot);
+                const total = Object.values(shares).reduce((sum, share) => sum + Number(share || 0), 0);
+                return <div className="mini-card" key={lot.id}>
+                  <div className="space"><b>{lot.country}</b><span className="badge neutral">Rank #{lot.rank}</span></div>
+                  <div className="ownership-lines">{Object.entries(shares).map(([id, share]) => <div className="ownership-line" key={id}><span>{participantName(participants, id)}</span><b>{money(share)}%</b></div>)}</div>
+                  <div className="mini-grid"><span>Auction Winner</span><b>{lot.winningBidder || "—"}</b><span>Price</span><b>{money(lot.finalPrice)}</b><span>Points</span><b>{money(lot.points)}</b></div>
+                  {Math.round(total) !== 100 && <p className="notice">Ownership totals {money(total)}%.</p>}
+                </div>;
+              })}
+            </div>
+          </>
+        ) : <p className="muted">No countries sold yet.</p>}
+      </div>
+    </div>
+  );
+}
+
+function Leaderboard({ participantsObj, scheduleObj, creditAdjustmentsObj }) {
+  const { participants } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj), [participantsObj, scheduleObj, creditAdjustmentsObj]);
+  const sorted = [...participants]
+    .filter((p) => p.id !== "admin")
+    .sort((a, b) => Number(b.profit || 0) - Number(a.profit || 0) || Number(b.points || 0) - Number(a.points || 0));
+
+  return (
+    <div className="container grid">
+      <div className="card page-title">
+        <p className="eyebrow">Standings · {sorted.length} participants</p>
         <h2>Leaderboard</h2>
-        <p className="muted">Profit = points earned − net credits spent. Credits received in trades reduce net credits spent; credits sent in trades increase it.</p>
+        <p className="muted">Profit = points earned − net credits spent. Credits received in trades reduce net credits spent; credits sent in trades increase it. Commissioner admin is excluded from rankings.</p>
       </div>
       <div className="card table-card">
         <table className="desktop-table">
-          <thead><tr><th>Rank</th><th>Participant</th><th>Points</th><th>Auction Spend</th><th>Trade Credits</th><th>Net Spent</th><th>Remaining</th><th>Profit</th><th>Holdings</th></tr></thead>
-          <tbody>{sorted.map((p, i) => <tr key={p.id}><td>{i + 1}</td><td><b>{p.name}</b></td><td>{money(p.points)}</td><td>{money(p.auctionSpent)}</td><td>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</td><td>{money(p.spent)}</td><td>{money(p.remaining)}</td><td><b>{money(p.profit)}</b></td><td>{p.holdings.length}</td></tr>)}</tbody>
+          <thead><tr><th>Rank</th><th>Participant</th><th>Profit</th><th>Points</th><th>Net Spent</th><th>Auction Spend</th><th>Trade Credits</th><th>Remaining</th><th>Holdings</th></tr></thead>
+          <tbody>{sorted.map((p, i) => <tr key={p.id}><td>{i + 1}</td><td><b>{p.name}</b></td><td><b>{money(p.profit)}</b></td><td>{money(p.points)}</td><td>{money(p.spent)}</td><td>{money(p.auctionSpent)}</td><td>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</td><td>{money(p.remaining)}</td><td>{p.holdings.length}</td></tr>)}</tbody>
         </table>
         <div className="mobile-cards leaderboard-cards">
           {sorted.map((p, i) => (
             <div className="mini-card" key={p.id}>
-              <div className="space"><b>#{i + 1} {p.name}</b><span className={`badge ${p.profit >= 0 ? "positive" : "negative"}`}>{money(p.profit)}</span></div>
-              <div className="mini-grid"><span>Points</span><b>{money(p.points)}</b><span>Auction Spend</span><b>{money(p.auctionSpent)}</b><span>Trade Credits</span><b>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</b><span>Net Spent</span><b>{money(p.spent)}</b><span>Remaining</span><b>{money(p.remaining)}</b><span>Holdings</span><b>{p.holdings.length}</b></div>
+              <div className="space"><b>#{i + 1} {p.name}</b><span className={`badge ${p.profit >= 0 ? "positive" : "negative"}`}>Profit {money(p.profit)}</span></div>
+              <div className="mini-grid"><span>Points</span><b>{money(p.points)}</b><span>Net Spent</span><b>{money(p.spent)}</b><span>Auction Spend</span><b>{money(p.auctionSpent)}</b><span>Trade Credits</span><b>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</b><span>Remaining</span><b>{money(p.remaining)}</b><span>Holdings</span><b>{p.holdings.length}</b></div>
             </div>
           ))}
         </div>
@@ -774,7 +797,7 @@ function summarizeTrade(trade, participants, lots) {
   return `${fromName} sends ${fromItems.join(" + ") || "nothing"} to ${toName}; ${toName} sends ${toItems.join(" + ") || "nothing"} to ${fromName}.`;
 }
 
-function validateTrade(trade, participants, lots, countryStatusObj = {}) {
+function validateTrade(trade, participants, lots) {
   const byId = Object.fromEntries(participants.map((p) => [p.id, p]));
   const from = byId[trade.fromParticipantId];
   const to = byId[trade.toParticipantId];
@@ -804,14 +827,12 @@ function validateTrade(trade, participants, lots, countryStatusObj = {}) {
   if (trade.fromCountryId) {
     const lot = lots.find((l) => l.id === trade.fromCountryId);
     if (!lot || lot.status !== "sold") return "Sender country must be a sold country.";
-    if (isCountryTradeLocked(countryStatusObj, lot.country)) return tradeLockMessage(countryStatusObj, lot.country);
     const owned = getLotShareForParticipant(lot, from.id);
     if (fromShare > owned) return `${from.name} only owns ${money(owned)}% of ${lot.country}.`;
   }
   if (trade.toCountryId) {
     const lot = lots.find((l) => l.id === trade.toCountryId);
     if (!lot || lot.status !== "sold") return "Receiver country must be a sold country.";
-    if (isCountryTradeLocked(countryStatusObj, lot.country)) return tradeLockMessage(countryStatusObj, lot.country);
     const owned = getLotShareForParticipant(lot, to.id);
     if (toShare > owned) return `${to.name} only owns ${money(owned)}% of ${lot.country}.`;
   }
@@ -819,10 +840,11 @@ function validateTrade(trade, participants, lots, countryStatusObj = {}) {
   return null;
 }
 
-function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, countryStatusObj }) {
+function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, settingsObj }) {
   const { participants, lots } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj), [participantsObj, scheduleObj, creditAdjustmentsObj]);
   const trades = useMemo(() => normalizeObj(tradesObj).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)), [tradesObj]);
   const me = participants.find((p) => p.id === user.id) || { id: user.id, name: user.name, remaining: STARTING_CREDITS, holdings: [] };
+  const tradingOpen = settingsObj?.tradingOpen !== false;
   const tradeableParticipants = participants.filter((p) => p.id !== user.id && p.id !== "admin");
   const defaultCounterparty = tradeableParticipants[0]?.id || "";
 
@@ -839,8 +861,8 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
   }, [counterpartyId, defaultCounterparty]);
 
   const counterparty = participants.find((p) => p.id === counterpartyId);
-  const myHoldings = (me.holdings || []).filter((h) => h.share > 0 && !isCountryTradeLocked(countryStatusObj, h.country));
-  const counterpartyHoldings = (counterparty?.holdings || []).filter((h) => h.share > 0 && !isCountryTradeLocked(countryStatusObj, h.country));
+  const myHoldings = (me.holdings || []).filter((h) => h.share > 0);
+  const counterpartyHoldings = (counterparty?.holdings || []).filter((h) => h.share > 0);
 
   const incoming = trades.filter((t) => t.status === "pending" && t.toParticipantId === user.id);
   const outgoing = trades.filter((t) => t.fromParticipantId === user.id && ["pending", "accepted"].includes(t.status));
@@ -880,7 +902,7 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
       createdAt: Date.now()
     };
 
-    const validationError = validateTrade(payload, participants, lots, countryStatusObj);
+    const validationError = validateTrade(payload, participants, lots);
     if (validationError) return alert(validationError);
 
     const tradeRef = push(dbPath("trades"));
@@ -890,7 +912,7 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
   }
 
   async function acceptTrade(trade) {
-    const validationError = validateTrade(trade, participants, lots, countryStatusObj);
+    const validationError = validateTrade(trade, participants, lots);
     if (validationError) return alert(`Trade can no longer be accepted: ${validationError}`);
     await update(dbPath(`trades/${trade.id}`), { status: "accepted", acceptedAt: Date.now() });
   }
@@ -905,7 +927,7 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
   }
 
   async function approveTrade(trade) {
-    const validationError = validateTrade(trade, participants, lots, countryStatusObj);
+    const validationError = validateTrade(trade, participants, lots);
     if (validationError) return alert(`Trade cannot be approved: ${validationError}`);
     if (!confirm(`Approve this trade?\n\n${summarizeTrade(trade, participants, lots)}`)) return;
 
@@ -944,9 +966,7 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
     addCreditAdjustment(trade.fromParticipantId, toCreditsNum, "Credits received in trade");
 
     updates[`trades/${trade.id}/status`] = "approved";
-    const approvedAt = Date.now();
-    updates[`trades/${trade.id}/approvedAt`] = approvedAt;
-    updates[`trades/${trade.id}/effectiveAt`] = approvedAt;
+    updates[`trades/${trade.id}/approvedAt`] = Date.now();
     updates[`trades/${trade.id}/approvedBy`] = user.id;
     await update(leagueRoot(), updates);
   }
@@ -974,6 +994,13 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
         <p className="muted">Propose country-share and credit trades. A trade only becomes official after the other participant accepts and admin gives final approval.</p>
       </div>
 
+      {!tradingOpen && (
+        <div className="card warning-card">
+          <h3><AlertTriangle size={18}/> Trading is currently closed</h3>
+          <p className="muted">The commissioner has temporarily closed new trade proposals. Existing accepted trades can still be reviewed by admin if needed.</p>
+        </div>
+      )}
+
       <div className="card notice-card">
         <h3>How trading works</h3>
         <div className="rules-grid">
@@ -987,7 +1014,7 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
       <div className="grid two">
         <div className="card trade-form-card">
           <div className="space top-wrap"><h3><Send size={18}/> Propose trade</h3><span className="badge neutral">Your credits: {money(me.remaining)}</span></div>
-          {user.id === "admin" ? <p className="muted">Admin should not propose trades. Log in as your participant username to trade.</p> : (
+          {user.id === "admin" ? <p className="muted">Admin should not propose trades. Log in as your participant username to trade.</p> : !tradingOpen ? <p className="muted">New trade proposals are closed by the commissioner.</p> : (
             <>
               <label className="field-label">Trade with</label>
               <select value={counterpartyId} onChange={(e) => { setCounterpartyId(e.target.value); setToCountryId(""); }}>
@@ -1087,7 +1114,7 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
   );
 }
 
-function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, matchResultsObj = {}, countryStatusObj = {} }) {
+function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, settingsObj, syncMetaObj }) {
   const { participants, lots } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj), [participantsObj, scheduleObj, creditAdjustmentsObj]);
   const trades = normalizeObj(tradesObj);
   const acceptedTrades = trades.filter((t) => t.status === "accepted").length;
@@ -1095,10 +1122,16 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
   const [scoreCountry, setScoreCountry] = useState(countries[0].name);
   const [points, setPoints] = useState(3);
   const [customName, setCustomName] = useState("");
-  const [selectedMatchId, setSelectedMatchId] = useState(worldCupMatches[0]?.id || "");
-  const [homeScore, setHomeScore] = useState(0);
-  const [awayScore, setAwayScore] = useState(0);
-  const [finalWhistle, setFinalWhistle] = useState(new Date().toISOString().slice(0, 16));
+  const [correctionCountryId, setCorrectionCountryId] = useState("");
+  const [correctionWinnerId, setCorrectionWinnerId] = useState("");
+  const [correctionPrice, setCorrectionPrice] = useState(0);
+  const [syncingSchedule, setSyncingSchedule] = useState(false);
+  const tradingOpen = settingsObj?.tradingOpen !== false;
+
+  useEffect(() => {
+    if (!correctionCountryId && lots.length) setCorrectionCountryId(lots[0].id);
+    if (!correctionWinnerId && participants.find((p) => p.id !== "admin")) setCorrectionWinnerId(participants.find((p) => p.id !== "admin")?.id || "");
+  }, [lots, participants, correctionCountryId, correctionWinnerId]);
 
   async function initSchedule() {
     if (!confirm("Initialize/reset auction schedule? This will overwrite current lots and bids.")) return;
@@ -1125,6 +1158,59 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
     await update(dbPath(`schedule/${lot.id}`), { points: Number(lot.points || 0) + Number(points || 0) });
   }
 
+  async function saveCountryCorrection() {
+    const lot = lots.find((l) => l.id === correctionCountryId);
+    const winner = participants.find((p) => p.id === correctionWinnerId);
+    if (!lot || !winner) return alert("Choose a country and winner.");
+    const price = Number(correctionPrice || 0);
+    if (price < 0) return alert("Price cannot be negative.");
+    if (!confirm(`Correct ${lot.country} to ${winner.name} for ${price} credits?`)) return;
+    await update(dbPath(`schedule/${lot.id}`), {
+      status: "sold",
+      winningParticipantId: winner.id,
+      winningBidder: winner.name,
+      finalPrice: price,
+      soldAt: lot.soldAt || Date.now(),
+      correctedAt: Date.now(),
+      correctedBy: "admin",
+      shares: { [winner.id]: 100 }
+    });
+  }
+
+  async function setTradingOpen(nextValue) {
+    await update(dbPath("settings"), { tradingOpen: Boolean(nextValue), tradingStatusUpdatedAt: Date.now() });
+  }
+
+  async function syncEspnSchedule() {
+    setSyncingSchedule(true);
+    try {
+      const response = await fetch("/api/espn-schedule");
+      if (!response.ok) throw new Error(`ESPN sync failed with HTTP ${response.status}`);
+      const payload = await response.json();
+      const matches = Array.isArray(payload.matches) ? payload.matches : [];
+      if (!matches.length) throw new Error("No matches returned from ESPN.");
+      const matchMap = Object.fromEntries(matches.map((m) => [m.id, m]));
+      await update(leagueRoot(), {
+        matches: matchMap,
+        syncMeta: {
+          ...(syncMetaObj || {}),
+          lastScheduleSyncAt: Date.now(),
+          lastScheduleSyncSource: "ESPN",
+          lastScheduleSyncCount: matches.length,
+          unmatchedTeams: payload.unmatchedTeams || [],
+          scheduleSyncError: ""
+        }
+      });
+      alert(`Imported ${matches.length} ESPN matches.`);
+    } catch (err) {
+      console.error(err);
+      await update(dbPath("syncMeta"), { scheduleSyncError: String(err.message || err), lastScheduleSyncAttemptAt: Date.now() });
+      alert(`ESPN schedule sync failed: ${err.message || err}. The seeded schedule remains available.`);
+    } finally {
+      setSyncingSchedule(false);
+    }
+  }
+
   async function removeParticipant(participant) {
     if (participant.id === "admin") return alert("Admin cannot be removed.");
     if (Number(participant.auctionSpent || 0) > 0 || Number(participant.holdings?.length || 0) > 0) {
@@ -1137,81 +1223,6 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
   async function clearAll() {
     if (!confirm("Clear the whole MVP league database?")) return;
     await set(ref(db, `leagues/${LEAGUE_ID}`), null);
-  }
-
-
-  async function saveMatchResult({ applyScoring = false } = {}) {
-    const match = worldCupMatches.find((m) => m.id === selectedMatchId);
-    if (!match) return alert("Select a valid match.");
-    const hs = Number(homeScore);
-    const as = Number(awayScore);
-    if (Number.isNaN(hs) || Number.isNaN(as)) return alert("Enter valid scores.");
-    const finalWhistleIso = finalWhistle ? new Date(finalWhistle).toISOString() : new Date().toISOString();
-
-    const baseResult = {
-      id: match.id,
-      home: match.home,
-      away: match.away,
-      stage: match.stage,
-      homeScore: hs,
-      awayScore: as,
-      status: applyScoring ? "final" : "pending",
-      finalWhistleTime: finalWhistleIso,
-      updatedAt: Date.now()
-    };
-
-    const updates = {};
-    updates[`matchResults/${match.id}`] = {
-      ...(matchResultsObj?.[match.id] || {}),
-      ...baseResult,
-      scoringApplied: applyScoring ? true : Boolean(matchResultsObj?.[match.id]?.scoringApplied)
-    };
-
-    updates[`countryStatus/${slug(match.home)}`] = { ...(countryStatusObj?.[slug(match.home)] || {}), status: applyScoring ? "active" : "locked", tradingLocked: !applyScoring, updatedAt: Date.now() };
-    updates[`countryStatus/${slug(match.away)}`] = { ...(countryStatusObj?.[slug(match.away)] || {}), status: applyScoring ? "active" : "locked", tradingLocked: !applyScoring, updatedAt: Date.now() };
-
-    if (applyScoring) {
-      if (matchResultsObj?.[match.id]?.scoringApplied && !confirm("Scoring was already applied for this match. Apply again anyway? This will add more points.")) return;
-      const homeLot = lots.find((l) => l.country === match.home);
-      const awayLot = lots.find((l) => l.country === match.away);
-      const award = (lot, pts) => {
-        if (lot && Number(pts || 0) > 0) updates[`schedule/${lot.id}/points`] = Number(lot.points || 0) + Number(pts);
-      };
-
-      if (match.stage === "Group Stage") {
-        if (hs > as) award(homeLot, STAGE_POINTS["Group Stage"].win);
-        else if (as > hs) award(awayLot, STAGE_POINTS["Group Stage"].win);
-        else {
-          award(homeLot, STAGE_POINTS["Group Stage"].draw);
-          award(awayLot, STAGE_POINTS["Group Stage"].draw);
-        }
-      } else {
-        const stagePointValue = STAGE_POINTS[match.stage]?.win || 0;
-        if (hs === as) return alert("Knockout matches need a winner before scoring can be applied.");
-        const winnerLot = hs > as ? homeLot : awayLot;
-        const loserName = hs > as ? match.away : match.home;
-        award(winnerLot, stagePointValue);
-        if (KNOCKOUT_STAGES.has(match.stage)) {
-          updates[`countryStatus/${slug(loserName)}`] = { status: "eliminated", eliminated: true, tradingLocked: true, eliminatedAt: Date.now(), updatedAt: Date.now() };
-        }
-      }
-    }
-
-    await update(leagueRoot(), updates);
-    alert(applyScoring ? "Result saved and scoring applied." : "Result saved as scoring pending. Trading is locked for those teams until scoring is applied or unlocked.");
-  }
-
-  async function setCountryManualStatus(countryName, status) {
-    if (!countryName) return;
-    const isEliminated = status === "eliminated";
-    const isLocked = status === "locked";
-    await update(dbPath(`countryStatus/${slug(countryName)}`), {
-      status,
-      eliminated: isEliminated,
-      tradingLocked: isEliminated || isLocked,
-      updatedAt: Date.now(),
-      ...(isEliminated ? { eliminatedAt: Date.now() } : {})
-    });
   }
 
   return (
@@ -1232,28 +1243,23 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
         <h3>Manual scoring</h3>
         <div className="row"><select value={scoreCountry} onChange={(e) => setScoreCountry(e.target.value)}>{countries.map((c) => <option key={c.name}>{c.name}</option>)}</select><input type="number" value={points} onChange={(e) => setPoints(e.target.value)} style={{ width: 100 }} /><button onClick={addPoints}>Add points</button></div>
 
-        <h3><ClipboardCheck size={16}/> Results Admin</h3>
-        <p className="muted small-text">Enter a final score, lock teams while scoring is pending, and apply points when ready. Trades affect a match only if approved before the final whistle time.</p>
-        <div className="results-admin-box">
-          <label className="field-label">Match</label>
-          <select value={selectedMatchId} onChange={(e) => setSelectedMatchId(e.target.value)}>
-            {worldCupMatches.map((m) => <option key={m.id} value={m.id}>{m.displayDate} · {m.time} · {m.home} vs {m.away} · {m.stage}</option>)}
-          </select>
-          <div className="row">
-            <input type="number" value={homeScore} onChange={(e) => setHomeScore(e.target.value)} placeholder="Home score" />
-            <input type="number" value={awayScore} onChange={(e) => setAwayScore(e.target.value)} placeholder="Away score" />
-          </div>
-          <label className="field-label">Final whistle time</label>
-          <input type="datetime-local" value={finalWhistle} onChange={(e) => setFinalWhistle(e.target.value)} />
-          <div className="row">
-            <button className="secondary" onClick={() => saveMatchResult({ applyScoring: false })}><Lock size={15}/> Save as scoring pending / lock teams</button>
-            <button onClick={() => saveMatchResult({ applyScoring: true })}><CheckCircle2 size={15}/> Apply scoring</button>
-          </div>
+        <h3>Correct country sale</h3>
+        <p className="muted small-text">Use this to fix skipped or misassigned countries without touching Firebase directly.</p>
+        <div className="row wrap-row">
+          <select value={correctionCountryId} onChange={(e) => setCorrectionCountryId(e.target.value)}>{lots.map((l) => <option key={l.id} value={l.id}>{l.country} · {l.status}</option>)}</select>
+          <select value={correctionWinnerId} onChange={(e) => setCorrectionWinnerId(e.target.value)}>{participants.filter((p) => p.id !== "admin").map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <input type="number" min="0" step="1" value={correctionPrice} onChange={(e) => setCorrectionPrice(e.target.value)} style={{ width: 100 }} />
+          <button onClick={saveCountryCorrection}><Save size={15}/> Save sale</button>
         </div>
 
-        <h3>Country trade status</h3>
-        <p className="muted small-text">Use this to manually block eliminated teams from trades or unlock active teams.</p>
-        <div className="row"><select value={scoreCountry} onChange={(e) => setScoreCountry(e.target.value)}>{countries.map((c) => <option key={c.name}>{c.name}</option>)}</select><button className="secondary" onClick={() => setCountryManualStatus(scoreCountry, "active")}>Active / tradable</button><button className="secondary" onClick={() => setCountryManualStatus(scoreCountry, "locked")}>Temporarily lock</button><button className="danger" onClick={() => setCountryManualStatus(scoreCountry, "eliminated")}>Eliminated</button></div>
+        <h3>Trading status</h3>
+        <p className="muted small-text">Close trading while auction reconciliation is in progress. Existing accepted trades still require admin approval before execution.</p>
+        <div className="row"><span className={`badge ${tradingOpen ? "positive" : "neutral"}`}>Trading is {tradingOpen ? "Open" : "Closed"}</span><button className="secondary" onClick={() => setTradingOpen(!tradingOpen)}>{tradingOpen ? "Close trading" : "Open trading"}</button></div>
+
+        <h3>ESPN schedule sync</h3>
+        <p className="muted small-text">Imports schedule data into Firebase for review only. This does not award points or change standings.</p>
+        <div className="row"><button onClick={syncEspnSchedule} disabled={syncingSchedule}><Download size={15}/> {syncingSchedule ? "Syncing..." : "Sync ESPN Schedule"}</button>{syncMetaObj?.lastScheduleSyncAt && <span className="muted small-text">Last sync: {new Date(syncMetaObj.lastScheduleSyncAt).toLocaleString()} · {syncMetaObj.lastScheduleSyncCount || 0} matches</span>}</div>
+        {syncMetaObj?.scheduleSyncError && <p className="notice"><b>Last sync error:</b> {syncMetaObj.scheduleSyncError}</p>}
 
         <hr />
         <button className="danger" onClick={clearAll}>Clear league database</button>
@@ -1289,9 +1295,10 @@ function App() {
   const [scheduleObj] = useFirebaseValue("schedule", {});
   const [creditAdjustmentsObj] = useFirebaseValue("creditAdjustments", {});
   const [tradesObj] = useFirebaseValue("trades", {});
-  const [matchResultsObj] = useFirebaseValue("matchResults", {});
-  const [countryStatusObj] = useFirebaseValue("countryStatus", {});
   const [auctionState] = useFirebaseValue("auctionState", { status: "idle", currentLotId: "", endAt: 0, remainingWhenPaused: null });
+  const [settingsObj] = useFirebaseValue("settings", {});
+  const [matchesObj] = useFirebaseValue("matches", {});
+  const [syncMetaObj] = useFirebaseValue("syncMeta", {});
   const isAdmin = Boolean(user && (user.name.toLowerCase() === "admin" || participantsObj?.[user.id]?.role === "admin"));
 
   useEffect(() => {
@@ -1311,12 +1318,13 @@ function App() {
       {page === "welcome" && <Welcome />}
       {page === "auction" && <Auction user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} auctionState={auctionState} />}
       {page === "schedule" && <AuctionSchedule scheduleObj={scheduleObj} />}
-      {page === "matches" && <Matches matchResultsObj={matchResultsObj} countryStatusObj={countryStatusObj} />}
+      {page === "matches" && <Matches matchesObj={matchesObj} syncMetaObj={syncMetaObj} />}
       {page === "portfolio" && <Portfolio user={user} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} />}
+      {page === "ownership" && <CountryOwnership participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} />}
       {page === "leaderboard" && <Leaderboard participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} />}
-      {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} countryStatusObj={countryStatusObj} />}
-      {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} matchResultsObj={matchResultsObj} countryStatusObj={countryStatusObj} />}
-      <div className="footer">v3D Schedule + Results + Trading rules · ESPN/Polymarket automation later</div>
+      {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} />}
+      {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} syncMetaObj={syncMetaObj} />}
+      <div className="footer">v3D Post-draft cleanup + ESPN schedule sync · Schedule import only, scoring automation later</div>
     </div>
   );
 }

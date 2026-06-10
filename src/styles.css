@@ -155,29 +155,39 @@ button.wide { width:100%; }
 .formula-card b { font-size:20px; }
 
 /* v3D additions */
-.max-bid-notice {
-  margin-top: 10px;
-  border-left: 4px solid #f59e0b;
-}
-.score-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.06);
-  font-weight: 700;
-}
-.results-admin-box {
-  display: grid;
+.sync-meta-row {
+  display: flex;
   gap: 10px;
-  padding: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  border-radius: 14px;
-  background: rgba(248, 250, 252, 0.78);
-  margin: 10px 0 18px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 12px;
 }
-.results-admin-box select,
-.results-admin-box input {
-  width: 100%;
+.warning-card {
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+}
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.badge.dangerish {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.22);
+}
+.wrap-row {
+  flex-wrap: wrap;
+}
+.ownership-lines {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+.adminOnly h3 svg,
+.notice-card h3 svg,
+.warning-card h3 svg,
+.trade-form-card h3 svg {
+  vertical-align: text-bottom;
 }
