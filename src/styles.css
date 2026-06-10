@@ -191,3 +191,52 @@ button.wide { width:100%; }
 .trade-form-card h3 svg {
   vertical-align: text-bottom;
 }
+
+/* v3E public refresh + scoring framework */
+.refresh-panel {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  min-width: 250px;
+}
+.refresh-panel small {
+  color: #637089;
+  font-size: 12px;
+}
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid #e3eaf4;
+  border-radius: 14px;
+  background: #fbfcff;
+  margin: 10px 0 14px;
+}
+.checkbox-grid label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.checkbox-grid input {
+  min-width: auto;
+  width: 16px;
+  height: 16px;
+}
+.badge.blocked_pending_trade,
+.badge.needs_review,
+.badge.ready_to_score {
+  background: #fff4d8;
+  color: #805300;
+}
+
+@media (max-width: 760px) {
+  .refresh-panel {
+    justify-items: stretch;
+    width: 100%;
+  }
+}
