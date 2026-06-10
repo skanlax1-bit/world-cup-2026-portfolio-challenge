@@ -128,7 +128,8 @@ function isKnownAppCountry(name) {
 }
 
 function inferStage(event) {
-  const text = `${event.name || ""} ${event.shortName || ""} ${event.season?.slug || ""}`.toLowerCase();
+  const text = `${event.name || ""} ${event.shortName || ""} ${event.season?.slug || ""} ${event.competitions?.[0]?.notes?.[0]?.headline || ""}`.toLowerCase();
+  if (text.includes("third-place") || text.includes("third place")) return "Third Place";
   if (text.includes("final")) return "Final";
   if (text.includes("semifinal") || text.includes("semi-final")) return "Semifinal";
   if (text.includes("quarterfinal") || text.includes("quarter-final")) return "Quarterfinal";
@@ -155,6 +156,31 @@ function venueLabel(competition) {
   return [name, city, state].filter(Boolean).join(", ");
 }
 
+function parseStatus(event, competition) {
+  const status = event.status || competition?.status || {};
+  const type = status.type || {};
+  const completed = Boolean(type.completed || status.completed);
+  const state = String(type.state || status.state || "").toLowerCase();
+  const rawClock = status.displayClock || competition?.status?.displayClock || type.shortDetail || type.detail || type.description || "";
+  if (completed || state === "post") {
+    return { statusType: "final", statusDisplay: "Final", matchMinute: null, completed: true };
+  }
+  if (state === "in" || type.name === "STATUS_IN_PROGRESS") {
+    const minuteMatch = String(rawClock).match(/(\d+)(?:\s*\+\s*(\d+))?/);
+    const statusDisplay = minuteMatch
+      ? `${minuteMatch[1]}${minuteMatch[2] ? `+${minuteMatch[2]}` : ""}'`
+      : "Live";
+    return { statusType: "live", statusDisplay, matchMinute: minuteMatch ? Number(minuteMatch[1]) : null, completed: false };
+  }
+  return { statusType: "not_started", statusDisplay: "Not Started", matchMinute: null, completed: false };
+}
+
+function getWinnerCountry(home, away, homeName, awayName) {
+  if (home?.winner === true) return homeName;
+  if (away?.winner === true) return awayName;
+  return "";
+}
+
 function normalizeEvent(event) {
   const competition = event.competitions?.[0] || {};
   const competitors = competition.competitors || [];
@@ -164,6 +190,7 @@ function normalizeEvent(event) {
   const awayName = normalizeTeamName(away.team?.displayName || away.team?.name || away.team?.shortDisplayName);
   const dateTime = event.date || competition.date || "";
   const dateParts = dateTime ? formatDateParts(dateTime) : { date: "", displayDate: "Unscheduled", time: "—" };
+  const statusParts = parseStatus(event, competition);
 
   return {
     id: `espn-${event.id}`,
@@ -176,7 +203,8 @@ function normalizeEvent(event) {
     stage: inferStage(event),
     source: "ESPN",
     status: event.status?.type?.description || event.status?.type?.name || "Scheduled",
-    completed: Boolean(event.status?.type?.completed),
+    ...statusParts,
+    winnerCountry: getWinnerCountry(home, away, homeName, awayName),
     homeScore: home.score ?? "",
     awayScore: away.score ?? "",
     lastSyncedAt: Date.now()
