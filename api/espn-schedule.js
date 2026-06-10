@@ -1,9 +1,61 @@
 const ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260719&limit=500";
 
+const APP_COUNTRIES = [
+  "France",
+  "Spain",
+  "England",
+  "Portugal",
+  "Germany",
+  "Brazil",
+  "Argentina",
+  "Netherlands",
+  "Norway",
+  "Türkiye",
+  "Senegal",
+  "Belgium",
+  "Uruguay",
+  "Morocco",
+  "Ecuador",
+  "Croatia",
+  "Ivory Coast",
+  "Colombia",
+  "Switzerland",
+  "Sweden",
+  "Japan",
+  "United States",
+  "Austria",
+  "Mexico",
+  "Canada",
+  "Algeria",
+  "Paraguay",
+  "Scotland",
+  "Czechia",
+  "South Korea",
+  "Egypt",
+  "Australia",
+  "Congo DR",
+  "Uzbekistan",
+  "Iran",
+  "Ghana",
+  "Bosnia and Herzegovina",
+  "Panama",
+  "Tunisia",
+  "Jordan",
+  "New Zealand",
+  "Iraq",
+  "Cape Verde",
+  "Saudi Arabia",
+  "Haiti",
+  "South Africa",
+  "Curaçao",
+  "Qatar"
+];
+
 const TEAM_ALIASES = {
   "USA": "United States",
   "United States": "United States",
   "USMNT": "United States",
+  "United States of America": "United States",
   "Korea Republic": "South Korea",
   "Republic of Korea": "South Korea",
   "South Korea": "South Korea",
@@ -11,14 +63,17 @@ const TEAM_ALIASES = {
   "Czechia": "Czechia",
   "Côte d'Ivoire": "Ivory Coast",
   "Cote d'Ivoire": "Ivory Coast",
+  "Côte d’Ivoire": "Ivory Coast",
   "Ivory Coast": "Ivory Coast",
   "Türkiye": "Türkiye",
   "Turkey": "Türkiye",
+  "Turkiye": "Türkiye",
   "Curacao": "Curaçao",
   "Curaçao": "Curaçao",
   "DR Congo": "Congo DR",
   "Congo DR": "Congo DR",
   "Democratic Republic of Congo": "Congo DR",
+  "Democratic Republic of the Congo": "Congo DR",
   "Bosnia & Herzegovina": "Bosnia and Herzegovina",
   "Bosnia-Herzegovina": "Bosnia and Herzegovina",
   "Bosnia and Herzegovina": "Bosnia and Herzegovina",
@@ -29,9 +84,47 @@ const TEAM_ALIASES = {
   "South Africa": "South Africa"
 };
 
+function normalizeForCompare(name) {
+  return String(name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+const ALIAS_BY_NORMALIZED_NAME = Object.fromEntries(
+  Object.entries(TEAM_ALIASES).map(([from, to]) => [normalizeForCompare(from), to])
+);
+
+const KNOWN_COUNTRIES_BY_NORMALIZED_NAME = new Set(APP_COUNTRIES.map(normalizeForCompare));
+
 function normalizeTeamName(name) {
   if (!name) return "TBD";
-  return TEAM_ALIASES[name] || name;
+  const cleaned = String(name).replace(/\s+/g, " ").trim();
+  return ALIAS_BY_NORMALIZED_NAME[normalizeForCompare(cleaned)] || cleaned;
+}
+
+function isBracketPlaceholder(name) {
+  const value = String(name || "").replace(/\s+/g, " ").trim();
+  if (!value || value === "TBD") return true;
+  return (
+    /^Group [A-L] (Winner|2nd Place)$/i.test(value) ||
+    /^Third Place Group /i.test(value) ||
+    /^Round Of (32|16) \d+ Winner$/i.test(value) ||
+    /^Round of (32|16) \d+ Winner$/i.test(value) ||
+    /^Quarterfinal \d+ Winner$/i.test(value) ||
+    /^Semifinal \d+ (Winner|Loser)$/i.test(value) ||
+    /^Final Winner$/i.test(value) ||
+    /^Match \d+ Winner$/i.test(value) ||
+    /^Winner Match \d+$/i.test(value) ||
+    /^Loser Match \d+$/i.test(value)
+  );
+}
+
+function isKnownAppCountry(name) {
+  return KNOWN_COUNTRIES_BY_NORMALIZED_NAME.has(normalizeForCompare(name));
 }
 
 function inferStage(event) {
@@ -90,6 +183,14 @@ function normalizeEvent(event) {
   };
 }
 
+function findUnmatchedTeams(matches) {
+  const names = matches.flatMap((m) => [m.home, m.away]).filter(Boolean);
+  return [...new Set(names)]
+    .filter((name) => !isBracketPlaceholder(name))
+    .filter((name) => !isKnownAppCountry(name))
+    .sort();
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -109,9 +210,7 @@ export default async function handler(req, res) {
     const data = await response.json();
     const events = Array.isArray(data.events) ? data.events : [];
     const matches = events.map(normalizeEvent).sort((a, b) => String(a.dateTime).localeCompare(String(b.dateTime)));
-
-    const known = new Set(Object.values(TEAM_ALIASES));
-    const unmatchedTeams = [...new Set(matches.flatMap((m) => [m.home, m.away]).filter((name) => name && name !== "TBD" && !known.has(name)))].sort();
+    const unmatchedTeams = findUnmatchedTeams(matches);
 
     return res.status(200).json({
       source: "ESPN",
