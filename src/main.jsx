@@ -144,6 +144,33 @@ function getMatchCountries(match) {
   return [match?.home, match?.away].filter(isRealAppCountry);
 }
 
+
+function applyPathValue(target, parts, value) {
+  if (!parts.length) return value;
+  const [head, ...rest] = parts;
+  const base = target && typeof target === "object" && !Array.isArray(target) ? { ...target } : {};
+  base[head] = rest.length ? applyPathValue(base[head], rest, value) : value;
+  return base;
+}
+
+function collapseFirebaseUpdateConflicts(updates) {
+  const result = { ...updates };
+  const paths = Object.keys(updates).sort((a, b) => a.length - b.length);
+  paths.forEach((parentPath) => {
+    if (!(parentPath in result)) return;
+    const parentValue = result[parentPath];
+    if (!parentValue || typeof parentValue !== "object" || Array.isArray(parentValue)) return;
+    const prefix = `${parentPath}/`;
+    Object.keys(result).forEach((childPath) => {
+      if (!childPath.startsWith(prefix)) return;
+      const childParts = childPath.slice(prefix.length).split("/").filter(Boolean);
+      result[parentPath] = applyPathValue(result[parentPath], childParts, result[childPath]);
+      delete result[childPath];
+    });
+  });
+  return result;
+}
+
 function scoringEventId(parts) {
   return parts.map(eventSafeId).filter(Boolean).join("_");
 }
@@ -946,7 +973,7 @@ function Matches({ user, participantsObj, scheduleObj, creditAdjustmentsObj, tra
         scheduleSyncError: ""
       };
 
-      await update(leagueRoot(), updates);
+      await update(leagueRoot(), collapseFirebaseUpdateConflicts(updates));
       setSyncMessage(`Refreshed ${imported.length} ESPN matches. Final matches were checked for scoring.`);
     } catch (err) {
       console.error(err);
@@ -1370,7 +1397,7 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
     updates[`trades/${trade.id}/status`] = "approved";
     updates[`trades/${trade.id}/approvedAt`] = Date.now();
     updates[`trades/${trade.id}/approvedBy`] = user.id;
-    await update(leagueRoot(), updates);
+    await update(leagueRoot(), collapseFirebaseUpdateConflicts(updates));
   }
 
   function TradeCard({ trade, actions }) {
@@ -1653,7 +1680,7 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
       [`matches/${matchId}`]: overridden,
       ...result.updates
     };
-    await update(leagueRoot(), updates);
+    await update(leagueRoot(), collapseFirebaseUpdateConflicts(updates));
     alert("Manual result override saved and match rescored.");
   }
 
@@ -1669,7 +1696,7 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
     });
     updates[`matches/${matchId}/scoringStatus`] = "";
     updates[`matches/${matchId}/scoredAt`] = null;
-    await update(leagueRoot(), updates);
+    await update(leagueRoot(), collapseFirebaseUpdateConflicts(updates));
   }
 
   function toggleGroupWinner(country) {
@@ -1702,7 +1729,7 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
     fillBonusAllocationsInUpdates(updates, participants, lots);
     updates[`settings/groupWinnerTeams`] = Object.fromEntries(groupWinnerTeams.map((country) => [country, true]));
     updates[`settings/groupWinnerUpdatedAt`] = Date.now();
-    await update(leagueRoot(), updates);
+    await update(leagueRoot(), collapseFirebaseUpdateConflicts(updates));
     alert("Group winner scoring reconciled.");
   }
 
@@ -1713,7 +1740,7 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
     updates[`settings/advancedManualOverrideActive`] = true;
     updates[`settings/advancedManualTeams`] = Object.fromEntries(advancedTeams.map((country) => [country, true]));
     updates[`settings/advancedManualUpdatedAt`] = Date.now();
-    await update(leagueRoot(), updates);
+    await update(leagueRoot(), collapseFirebaseUpdateConflicts(updates));
     alert("Advanced-from-group scoring reconciled. Manual override now supersedes auto-detect.");
   }
 
