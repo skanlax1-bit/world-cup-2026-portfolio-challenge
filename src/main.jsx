@@ -193,6 +193,86 @@ function createCountryAllocations(country, points, participants, lots) {
   return allocations;
 }
 
+
+function getEventCutoff(event, matchesObj) {
+  const match = event?.matchId ? (matchesObj?.[event.matchId] || normalizeObj(matchesObj).find((m) => m.id === event.matchId || `espn-${m.espnEventId}` === event.matchId)) : null;
+  return Number(
+    match?.finalObservedAt ||
+    match?.scoredAt ||
+    match?.lastSyncedAt ||
+    event?.createdAt ||
+    Date.now()
+  );
+}
+
+function reconstructCountrySharesAt(country, lots, trades, cutoffAt) {
+  const lot = lots.find((l) => l.country === country);
+  if (!lot) return {};
+
+  const initialOwner = lot.winningParticipantId;
+  const shares = initialOwner ? { [initialOwner]: 100 } : getLotShares(lot);
+
+  const approvedTrades = trades
+    .filter((trade) => trade.status === "approved")
+    .map((trade) => ({
+      ...trade,
+      effectiveAt: Number(trade.acceptedAt || trade.approvedAt || trade.createdAt || 0)
+    }))
+    .filter((trade) => trade.effectiveAt > 0 && trade.effectiveAt <= Number(cutoffAt || Date.now()))
+    .sort((a, b) => a.effectiveAt - b.effectiveAt);
+
+  const move = (fromId, toId, amount) => {
+    const qty = Number(amount || 0);
+    if (!fromId || !toId || qty <= 0) return;
+    shares[fromId] = Number(shares[fromId] || 0) - qty;
+    shares[toId] = Number(shares[toId] || 0) + qty;
+    if (shares[fromId] <= 0.000001) delete shares[fromId];
+  };
+
+  approvedTrades.forEach((trade) => {
+    const fromMatches = trade.fromCountryId === lot.id || trade.fromCountryName === country;
+    const toMatches = trade.toCountryId === lot.id || trade.toCountryName === country;
+    if (fromMatches) move(trade.fromParticipantId, trade.toParticipantId, trade.fromShare);
+    if (toMatches) move(trade.toParticipantId, trade.fromParticipantId, trade.toShare);
+  });
+
+  return cleanShares(shares);
+}
+
+function createHistoricalCountryAllocations(country, points, participants, lots, trades, cutoffAt) {
+  const shares = reconstructCountrySharesAt(country, lots, trades, cutoffAt);
+  const allocations = {};
+  Object.entries(shares).forEach(([participantId, share]) => {
+    const participant = participants.find((p) => p.id === participantId);
+    const participantPoints = Number(points || 0) * (Number(share || 0) / 100);
+    if (!participant || participantPoints === 0) return;
+    allocations[participantId] = {
+      participantId,
+      participantName: participant.name,
+      share: Number(share || 0),
+      points: participantPoints
+    };
+  });
+  return allocations;
+}
+
+function buildMissingAllocationRepairs(scoringEventsObj, matchesObj, participants, lots, trades) {
+  const repairs = {};
+  normalizeObj(scoringEventsObj).forEach((event) => {
+    if (!isActiveScoringEvent(event)) return;
+    if (event.allocations && Object.keys(event.allocations).length) return;
+    if (!event.country || !Number(event.points || 0)) return;
+    const cutoffAt = getEventCutoff(event, matchesObj);
+    const allocations = createHistoricalCountryAllocations(event.country, Number(event.points || 0), participants, lots, trades, cutoffAt);
+    if (!Object.keys(allocations).length) return;
+    repairs[`scoringEvents/${event.id}/allocations`] = allocations;
+    repairs[`scoringEvents/${event.id}/allocationsRepairedAt`] = Date.now();
+    repairs[`scoringEvents/${event.id}/allocationsRepairMethod`] = "auction_plus_approved_trades_by_effective_time";
+    repairs[`scoringEvents/${event.id}/allocationsCutoffAt`] = cutoffAt;
+  });
+  return repairs;
+}
+
 function matchInvolvesTradeCountry(trade, countryNames) {
   const set = new Set(countryNames);
   return Boolean(
@@ -222,7 +302,7 @@ function getLockedCountriesFromMatches(matchesObj) {
   return locked;
 }
 
-function buildScoringEventsForFinalMatch(match, participants, lots, options = {}) {
+function buildScoringEventsForFinalMatch(match, participants, lots, trades, options = {}) {
   const events = [];
   const matchId = match.id || `espn-${match.espnEventId}`;
   const source = options.source || "ESPN";
@@ -250,7 +330,7 @@ function buildScoringEventsForFinalMatch(match, participants, lots, options = {}
       status: "active",
       active: true,
       createdAt: Date.now(),
-      allocations: createCountryAllocations(country, Number(points), participants, lots)
+      allocations: createHistoricalCountryAllocations(country, Number(points), participants, lots, trades, Number(match.finalObservedAt || match.scoredAt || match.lastSyncedAt || Date.now()))
     });
   };
 
@@ -309,7 +389,7 @@ function evaluateFinalMatchForScoring(match, context, options = {}) {
     };
   }
 
-  const events = buildScoringEventsForFinalMatch(match, participants, lots, options);
+  const events = buildScoringEventsForFinalMatch(match, participants, lots, trades, options);
   const updates = {};
   const newEventIds = new Set(events.map((event) => event.id));
   if (options.forceRescore) {
@@ -1758,6 +1838,15 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
     await set(dbPath(`participants/${participant.id}`), null);
   }
 
+  async function repairMissingAllocations() {
+    const repairs = buildMissingAllocationRepairs(scoringEventsObj, matchesObj, participants, lots, trades);
+    const eventIds = [...new Set(Object.keys(repairs).map((path) => path.split("/")[1]).filter(Boolean))];
+    if (!eventIds.length) return alert("No active scoring events with repairable missing allocations were found.");
+    if (!confirm(`Repair missing ownership allocations for ${eventIds.length} scoring event${eventIds.length === 1 ? "" : "s"}?\n\nThe repair reconstructs ownership from the original auction winner plus approved trades effective before each event cutoff.`)) return;
+    await update(leagueRoot(), repairs);
+    alert(`Repaired allocations for ${eventIds.length} scoring event${eventIds.length === 1 ? "" : "s"}. The leaderboard should update automatically.`);
+  }
+
   async function clearAll() {
     if (!confirm("Clear the whole MVP league database?")) return;
     await set(ref(db, `leagues/${LEAGUE_ID}`), null);
@@ -1781,6 +1870,10 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
         <h3>Manual scoring adjustment</h3>
         <p className="muted small-text">Creates an auditable scoring ledger event allocated to current owners. Use result override below for match-specific corrections.</p>
         <div className="row"><select value={scoreCountry} onChange={(e) => setScoreCountry(e.target.value)}>{countries.map((c) => <option key={c.name}>{c.name}</option>)}</select><input type="number" value={points} onChange={(e) => setPoints(e.target.value)} style={{ width: 100 }} /><button onClick={addPoints}>Add ledger points</button></div>
+
+        <h3>Repair missing scoring allocations</h3>
+        <p className="muted small-text">Repairs active scoring events that lost their ownership snapshot. It reconstructs ownership from the auction winner and approved trades effective before each match cutoff, while preserving the existing event IDs so points cannot duplicate.</p>
+        <div className="row"><button onClick={repairMissingAllocations}><ShieldCheck size={15}/> Repair missing allocations</button></div>
 
         <h3>Correct country sale</h3>
         <p className="muted small-text">Use this to fix skipped or misassigned countries without touching Firebase directly.</p>
