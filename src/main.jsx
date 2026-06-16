@@ -1171,31 +1171,44 @@ function Matches({ user, participantsObj, scheduleObj, creditAdjustmentsObj, tra
               </div>
               <span className="badge neutral">{section.matches.length} match{section.matches.length === 1 ? "" : "es"}</span>
             </div>
-            <div className="match-card-grid">
-              {section.matches.map((m) => (
-                <div className={`match-card ${m.statusType || "not_started"}`} key={m.id || m.espnEventId}>
-                  <div className="match-card-top">
-                    <span className="match-stage">{m.stage || "Group Stage"}</span>
-                    <span className={`badge ${statusBadgeClass(m)}`}>{m.statusDisplay || "Not Started"}</span>
+            <div className="fixture-list">
+              {section.matches.map((m) => {
+                const score = scoreText(m);
+                const [homeScore, awayScore] = score === "—" ? ["—", "—"] : String(score).split("–");
+                const scoringLabel = m.scoringStatus ? m.scoringStatus.replaceAll("_", " ") : "Pending final result";
+                return (
+                  <div className={`fixture-card ${m.statusType || "not_started"}`} key={m.id || m.espnEventId}>
+                    <div className="fixture-status-cell">
+                      <span className={`badge ${statusBadgeClass(m)}`}>{m.statusDisplay || "Not Started"}</span>
+                      <span className="match-stage">{m.stage || "Group Stage"}</span>
+                    </div>
+                    <div className="fixture-teams-cell">
+                      <div className="fixture-team-row">
+                        <span className="fixture-team-name">{m.home}</span>
+                        <strong className="fixture-team-score">{homeScore || "0"}</strong>
+                      </div>
+                      <div className="fixture-team-row">
+                        <span className="fixture-team-name">{m.away}</span>
+                        <strong className="fixture-team-score">{awayScore || "0"}</strong>
+                      </div>
+                    </div>
+                    <div className="fixture-detail-cell">
+                      <span className="fixture-label">Kickoff</span>
+                      <strong>{m.displayDate || fmtDate(m.dateTime)}</strong>
+                      <span>{m.time || fmtTime(m.dateTime)}</span>
+                    </div>
+                    <div className="fixture-detail-cell fixture-venue-cell">
+                      <span className="fixture-label">Venue</span>
+                      <strong>{m.venue || "Venue TBD"}</strong>
+                    </div>
+                    <div className="fixture-detail-cell">
+                      <span className="fixture-label">Scoring</span>
+                      <span className={`badge ${m.scoringStatus === "scored" ? "positive" : m.scoringStatus ? "dangerish" : "neutral"}`}>{scoringLabel}</span>
+                    </div>
+                    {(m.scoringWarning || m.scoringBlockReason) && <p className="notice fixture-notice">{m.scoringWarning || m.scoringBlockReason}</p>}
                   </div>
-                  <div className="match-score-row">
-                    <span className="team-name">{m.home}</span>
-                    <b>{scoreText(m) === "—" ? "—" : String(scoreText(m)).split("–")[0]}</b>
-                  </div>
-                  <div className="match-score-row">
-                    <span className="team-name">{m.away}</span>
-                    <b>{scoreText(m) === "—" ? "—" : String(scoreText(m)).split("–")[1]}</b>
-                  </div>
-                  <div className="match-card-meta">
-                    <span>{m.venue || "Venue TBD"}</span>
-                    <span>{m.displayDate || fmtDate(m.dateTime)} · {m.time || fmtTime(m.dateTime)}</span>
-                  </div>
-                  <div className="match-card-footer">
-                    {m.scoringStatus ? <span className={`badge ${m.scoringStatus === "scored" ? "positive" : "dangerish"}`}>Scoring: {m.scoringStatus.replaceAll("_", " ")}</span> : <span className="muted small-text">Scoring pending final result</span>}
-                  </div>
-                  {(m.scoringWarning || m.scoringBlockReason) && <p className="notice">{m.scoringWarning || m.scoringBlockReason}</p>}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}
