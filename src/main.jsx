@@ -103,6 +103,72 @@ function groupMatchesByDate(matches) {
   }, {});
 }
 
+function matchSortTime(match) {
+  const raw = match?.dateTime || match?.date || match?.kickoff || "";
+  const parsed = raw ? new Date(raw).getTime() : 0;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function isSameLocalDay(a, b) {
+  if (!a || !b) return false;
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function splitMatchesForDisplay(matches) {
+  const today = new Date();
+  const ordered = [...matches].sort((a, b) => matchSortTime(a) - matchSortTime(b));
+  const todaysGames = [];
+  const upcomingGames = [];
+  const completedGames = [];
+
+  ordered.forEach((match) => {
+    const when = matchSortTime(match) ? new Date(matchSortTime(match)) : null;
+    if (match.statusType === "final" || match.completed) completedGames.push(match);
+    else if (when && isSameLocalDay(when, today)) todaysGames.push(match);
+    else upcomingGames.push(match);
+  });
+
+  return [
+    { key: "today", title: "Today’s Games", subtitle: "Live and upcoming matches for today.", matches: todaysGames },
+    { key: "upcoming", title: "Upcoming Games", subtitle: "Future matches sorted by kickoff time.", matches: upcomingGames },
+    { key: "completed", title: "Completed Games", subtitle: "Final matches move here after they are scored.", matches: completedGames }
+  ].filter((section) => section.matches.length);
+}
+
+function scoreText(match) {
+  const homeScore = match?.homeScore;
+  const awayScore = match?.awayScore;
+  const hasScore = homeScore !== undefined && awayScore !== undefined && homeScore !== "" && awayScore !== "" && homeScore !== null && awayScore !== null;
+  return hasScore ? `${homeScore}–${awayScore}` : "—";
+}
+
+function statusBadgeClass(match) {
+  if (match?.statusType === "final" || match?.completed) return "positive";
+  if (match?.statusType === "live") return "live";
+  return "neutral";
+}
+
+function eventDisplayType(type) {
+  const map = {
+    groupStageWin: "Group-stage win",
+    groupStageDraw: "Group-stage draw",
+    advanceFromGroup: "Advance from group",
+    groupWinner: "Win group",
+    round_of_32Win: "Round of 32 win",
+    round_of_16Win: "Round of 16 win",
+    quarterfinalWin: "Quarterfinal win",
+    semifinalWin: "Semifinal win",
+    finalWin: "Final win"
+  };
+  return map[type] || String(type || "Scoring event").replace(/_/g, " ");
+}
+
+function lastScoringEvent(scoringEventsObj) {
+  return normalizeObj(scoringEventsObj)
+    .filter(isActiveScoringEvent)
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0] || null;
+}
+
 const APP_COUNTRY_NAMES = countries.map((c) => c.name);
 const APP_COUNTRY_SET = new Set(APP_COUNTRY_NAMES);
 const GROUP_STAGE_WIN_POINTS = 3;
@@ -614,13 +680,14 @@ function Login({ onLogin, participantsObj }) {
 
 function Header({ page, setPage, user, onLogout, isAdmin }) {
   const items = [
-    ["welcome", "Welcome", BookOpen],
+    ["welcome", "Home", BookOpen],
     ["auction", "Auction", Gavel],
     ["schedule", "Auction Schedule", ListChecks],
     ["matches", "Matches", CalendarDays],
     ["portfolio", "Portfolios", Wallet],
     ["ownership", "Ownership", Users],
     ["leaderboard", "Leaderboard", BarChart3],
+    ["scoring", "Scoring Log", History],
     ["trading", "Trading", ArrowLeftRight],
     ...(isAdmin ? [["admin", "Admin", Settings]] : [])
   ];
@@ -653,69 +720,69 @@ function StatCard({ label, value, sub, tone = "" }) {
   );
 }
 
-function Welcome() {
+function Welcome({ participantsObj, scheduleObj, creditAdjustmentsObj, matchesObj, syncMetaObj, scoringEventsObj, tradesObj }) {
+  const { participants } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj), [participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj]);
+  const ranked = [...participants].filter((p) => p.id !== "admin").sort((a, b) => Number(b.profit || 0) - Number(a.profit || 0));
+  const leader = ranked[0];
+  const matches = useMemo(() => getActiveMatches(matchesObj), [matchesObj]);
+  const sections = splitMatchesForDisplay(matches);
+  const todayMatch = sections.find((section) => section.key === "today")?.matches?.[0];
+  const nextMatch = todayMatch || sections.find((section) => section.key === "upcoming")?.matches?.[0];
+  const liveMatch = matches.find((m) => m.statusType === "live");
+  const recentEvent = lastScoringEvent(scoringEventsObj);
+  const pendingAdminActions = normalizeObj(tradesObj).filter((t) => t.status === "accepted").length + normalizeObj(matchesObj).filter((m) => (m.statusType === "final" || m.completed) && m.scoringStatus && m.scoringStatus !== "scored").length;
+  const lastSyncAt = Number(syncMetaObj?.lastMatchSyncAt || syncMetaObj?.lastScheduleSyncAt || 0);
+
   return (
     <div className="container grid">
-      <div className="card page-title welcome-hero-card">
-        <p className="eyebrow">League format</p>
+      <div className="card page-title welcome-hero-card home-hero-card">
+        <p className="eyebrow">Live dashboard</p>
         <h2>World Cup 2026 Portfolio Challenge</h2>
-        <p className="muted">Office-friendly World Cup auction pool with portfolio-style ownership and trading.</p>
+        <p className="muted">Live standings, match flow, scoring events, and portfolio updates in one place.</p>
+      </div>
+
+      <div className="dashboard-grid">
+        <StatCard label="Current Leader" value={leader ? leader.name : "—"} sub={leader ? `Profit ${money(leader.profit)} · Points ${money(leader.points)}` : "No leaderboard yet"} tone="leader" />
+        <StatCard label="Live Match" value={liveMatch ? `${liveMatch.home} ${scoreText(liveMatch)} ${liveMatch.away}` : "No live match"} sub={liveMatch ? `${liveMatch.statusDisplay || "Live"} · ${liveMatch.stage || "Group Stage"}` : "Refresh ESPN match data on the Matches tab"} tone={liveMatch ? "live" : ""} />
+        <StatCard label="Next Match" value={nextMatch ? `${nextMatch.home} vs ${nextMatch.away}` : "—"} sub={nextMatch ? `${nextMatch.displayDate || fmtDate(nextMatch.dateTime)} · ${nextMatch.time || fmtTime(nextMatch.dateTime)}` : "No upcoming matches loaded"} />
+        <StatCard label="Last Scoring Event" value={recentEvent ? `${recentEvent.country} +${money(recentEvent.points)}` : "—"} sub={recentEvent ? `${eventDisplayType(recentEvent.type)} · ${recentEvent.source || "Ledger"}` : "No scoring events yet"} tone={recentEvent ? "positive" : ""} />
       </div>
 
       <div className="grid two">
         <div className="card">
-          <h3>Format</h3>
-          <div className="rules-list">
-            <p>Each participant starts with <b>45 credits</b>.</p>
-            <p>All World Cup countries are auctioned off in scheduled 5-minute windows.</p>
-            <p>You can only bid up to your remaining credits.</p>
-            <p>If you win a country, those credits are deducted from your balance.</p>
-            <p>Each country starts as <b>100% owned</b> by the auction winner.</p>
+          <h3>Match center status</h3>
+          <div className="mini-grid dashboard-mini-grid">
+            <span>Last ESPN sync</span><b>{lastSyncAt ? `${new Date(lastSyncAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} by ${syncMetaObj?.lastMatchSyncByName || "admin"}` : "Not synced yet"}</b>
+            <span>Admin actions</span><b>{pendingAdminActions}</b>
+            <span>Today’s games</span><b>{sections.find((s) => s.key === "today")?.matches.length || 0}</b>
+            <span>Completed games</span><b>{sections.find((s) => s.key === "completed")?.matches.length || 0}</b>
           </div>
         </div>
 
         <div className="card">
-          <h3>Winning the league</h3>
-          <div className="formula-card">
-            <span>Profit</span>
-            <b>= Points Earned − Net Credits Spent</b>
-          </div>
-          <p className="muted">Example: if you buy Spain for 40 credits and Spain earns 55 points, your profit is +15.</p>
-          <p className="muted">Credits received in trades reduce your net credits spent. Credits sent in trades increase your net credits spent.</p>
-        </div>
-      </div>
-
-      <div className="card table-card">
-        <h3>Scoring</h3>
-        <table className="desktop-table">
-          <thead><tr><th>Event</th><th>Points</th></tr></thead>
-          <tbody>
-            <tr><td>Group Stage Win</td><td><b>3</b></td></tr>
-            <tr><td>Group Stage Draw</td><td><b>1</b></td></tr>
-            <tr><td>Advance from Group</td><td><b>3</b></td></tr>
-            <tr><td>Win Group</td><td><b>3</b></td></tr>
-            <tr><td>Round of 32 Win</td><td><b>5</b></td></tr>
-            <tr><td>Round of 16 Win</td><td><b>9</b></td></tr>
-            <tr><td>Quarterfinal Win</td><td><b>15</b></td></tr>
-            <tr><td>Semifinal Win</td><td><b>22</b></td></tr>
-            <tr><td>Final Win</td><td><b>34</b></td></tr>
-          </tbody>
-        </table>
-        <div className="mobile-cards">
-          {[
-            ["Group Stage Win",3],["Group Stage Draw",1],["Advance from Group",3],["Win Group",3],["Round of 32 Win",5],["Round of 16 Win",9],["Quarterfinal Win",15],["Semifinal Win",22],["Final Win",34]
-          ].map(([event, pts]) => <div className="mini-card" key={event}><div className="space"><b>{event}</b><span className="badge neutral">{pts} pts</span></div></div>)}
-        </div>
-        <p className="notice">A perfect champion earns 100 points.</p>
-      </div>
-
-      <div className="card">
-        <h3>Trading</h3>
-        <div className="rules-grid">
-          <p>Country shares can be traded in minimum increments of <b>1%</b>.</p>
-          <p>Trades can include credits to balance value.</p>
-          <p>The receiving participant can accept or reject an offer in the Trading inbox.</p>
-          <p>Accepted trades require final admin approval before they are executed.</p>
+          <h3>Rules & scoring</h3>
+          <details open>
+            <summary>Core format</summary>
+            <p className="muted">Each participant started with 45 credits. Profit = points earned − net credits spent. Credits received in trades reduce net credits spent; credits sent increase it.</p>
+          </details>
+          <details>
+            <summary>Scoring table</summary>
+            <div className="mini-grid rules-mini-grid">
+              <span>Group Stage Win</span><b>3</b>
+              <span>Group Stage Draw</span><b>1</b>
+              <span>Advance from Group</span><b>3</b>
+              <span>Win Group</span><b>3</b>
+              <span>Round of 32 Win</span><b>5</b>
+              <span>Round of 16 Win</span><b>9</b>
+              <span>Quarterfinal Win</span><b>15</b>
+              <span>Semifinal Win</span><b>22</b>
+              <span>Final Win</span><b>34</b>
+            </div>
+          </details>
+          <details>
+            <summary>Trading</summary>
+            <p className="muted">Country shares can be traded in 1% increments. Accepted trades require final admin approval before they are executed.</p>
+          </details>
         </div>
       </div>
     </div>
@@ -964,7 +1031,7 @@ function Matches({ user, participantsObj, scheduleObj, creditAdjustmentsObj, tra
   const trades = useMemo(() => normalizeObj(tradesObj), [tradesObj]);
   const matches = useMemo(() => getActiveMatches(matchesObj), [matchesObj]);
   const usingImported = normalizeObj(matchesObj).length > 0;
-  const grouped = useMemo(() => groupMatchesByDate(matches), [matches]);
+  const matchSections = useMemo(() => splitMatchesForDisplay(matches), [matches]);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const now = useNow(1000);
@@ -1094,27 +1161,38 @@ function Matches({ user, participantsObj, scheduleObj, creditAdjustmentsObj, tra
         </div>
       )}
 
-      <div className="grid">
-        {Object.entries(grouped).map(([date, dateMatches]) => (
-          <div className="card" key={date}>
-            <h3>{date}</h3>
-            <table className="desktop-table">
-              <thead><tr><th>Status</th><th>Match</th><th>Score</th><th>Time</th><th>Venue</th><th>Stage</th><th>Scoring</th></tr></thead>
-              <tbody>{dateMatches.map((m) => <tr key={m.id || m.espnEventId}>
-                <td><span className={`badge ${m.statusType === "final" ? "positive" : m.statusType === "live" ? "live" : "neutral"}`}>{m.statusDisplay || "Not Started"}</span></td>
-                <td><b>{m.home}</b> vs <b>{m.away}</b></td>
-                <td><b>{m.homeScore !== "" && m.awayScore !== "" ? `${m.homeScore}–${m.awayScore}` : "—"}</b></td>
-                <td>{m.time || fmtTime(m.dateTime)}</td>
-                <td>{m.venue || "—"}</td>
-                <td>{m.stage || "Group Stage"}</td>
-                <td>{m.scoringStatus ? <span className={`badge ${m.scoringStatus === "scored" ? "positive" : "dangerish"}`}>{m.scoringStatus.replaceAll("_", " ")}</span> : <span className="muted">—</span>}</td>
-              </tr>)}</tbody>
-            </table>
-            <div className="mobile-cards">
-              {dateMatches.map((m) => (
-                <div className="mini-card" key={m.id || m.espnEventId}>
-                  <div className="space"><b>{m.home} vs {m.away}</b><span className={`badge ${m.statusType === "final" ? "positive" : m.statusType === "live" ? "live" : "neutral"}`}>{m.statusDisplay || "Not Started"}</span></div>
-                  <div className="mini-grid"><span>Score</span><b>{m.homeScore !== "" && m.awayScore !== "" ? `${m.homeScore}–${m.awayScore}` : "—"}</b><span>Time</span><b>{m.time || fmtTime(m.dateTime)}</b><span>Stage</span><b>{m.stage || "Group Stage"}</b><span>Venue</span><b>{m.venue || "—"}</b><span>Scoring</span><b>{m.scoringStatus ? m.scoringStatus.replaceAll("_", " ") : "—"}</b></div>
+      <div className="grid match-section-list">
+        {matchSections.map((section) => (
+          <div className="card match-section-card" key={section.key}>
+            <div className="space top-wrap">
+              <div>
+                <h3>{section.title}</h3>
+                <p className="muted small-text">{section.subtitle}</p>
+              </div>
+              <span className="badge neutral">{section.matches.length} match{section.matches.length === 1 ? "" : "es"}</span>
+            </div>
+            <div className="match-card-grid">
+              {section.matches.map((m) => (
+                <div className={`match-card ${m.statusType || "not_started"}`} key={m.id || m.espnEventId}>
+                  <div className="match-card-top">
+                    <span className="match-stage">{m.stage || "Group Stage"}</span>
+                    <span className={`badge ${statusBadgeClass(m)}`}>{m.statusDisplay || "Not Started"}</span>
+                  </div>
+                  <div className="match-score-row">
+                    <span className="team-name">{m.home}</span>
+                    <b>{scoreText(m) === "—" ? "—" : String(scoreText(m)).split("–")[0]}</b>
+                  </div>
+                  <div className="match-score-row">
+                    <span className="team-name">{m.away}</span>
+                    <b>{scoreText(m) === "—" ? "—" : String(scoreText(m)).split("–")[1]}</b>
+                  </div>
+                  <div className="match-card-meta">
+                    <span>{m.venue || "Venue TBD"}</span>
+                    <span>{m.displayDate || fmtDate(m.dateTime)} · {m.time || fmtTime(m.dateTime)}</span>
+                  </div>
+                  <div className="match-card-footer">
+                    {m.scoringStatus ? <span className={`badge ${m.scoringStatus === "scored" ? "positive" : "dangerish"}`}>Scoring: {m.scoringStatus.replaceAll("_", " ")}</span> : <span className="muted small-text">Scoring pending final result</span>}
+                  </div>
                   {(m.scoringWarning || m.scoringBlockReason) && <p className="notice">{m.scoringWarning || m.scoringBlockReason}</p>}
                 </div>
               ))}
@@ -1164,23 +1242,28 @@ function Portfolio({ user, participantsObj, scheduleObj, creditAdjustmentsObj, s
         <StatCard label="Profit" value={money(selected.profit)} tone={selected.profit >= 0 ? "positive" : "negative"} />
       </div>
 
-      <div className="card table-card">
-        <h3>Holdings</h3>
+      <div className="card">
+        <div className="space top-wrap"><h3>Holdings</h3><span className="badge neutral">{selected.holdings?.length || 0} countries</span></div>
         {selected.holdings?.length ? (
-          <>
-            <table className="desktop-table">
-              <thead><tr><th>ESPN Rank</th><th>Country</th><th>Share</th><th>Auction Cost</th><th>Points</th><th>Country P/L</th></tr></thead>
-              <tbody>{selected.holdings.map((l) => <tr key={l.id}><td>{l.rank}</td><td><b>{l.country}</b></td><td>{money(l.share)}%</td><td>{money(l.ownerCost)}</td><td>{money(l.ownerPoints)}</td><td><b>{money(Number(l.ownerPoints || 0) - Number(l.ownerCost || 0))}</b></td></tr>)}</tbody>
-            </table>
-            <div className="mobile-cards">
-              {selected.holdings.map((l) => (
-                <div className="mini-card" key={l.id}>
-                  <div className="space"><b>{l.country}</b><span className="badge neutral">Share {money(l.share)}%</span></div>
-                  <div className="mini-grid"><span>ESPN Rank</span><b>#{l.rank}</b><span>Auction Cost</span><b>{money(l.ownerCost)}</b><span>Points</span><b>{money(l.ownerPoints)}</b><span>Country P/L</span><b>{money(Number(l.ownerPoints || 0) - Number(l.ownerCost || 0))}</b></div>
+          <div className="portfolio-card-grid">
+            {selected.holdings.map((l) => {
+              const countryProfit = Number(l.ownerPoints || 0) - Number(l.ownerCost || 0);
+              return (
+                <div className="portfolio-card" key={l.id}>
+                  <div className="space top-wrap">
+                    <div><b>{l.country}</b><small>ESPN rank #{l.rank}</small></div>
+                    <span className="badge neutral">{money(l.share)}%</span>
+                  </div>
+                  <div className="mini-grid">
+                    <span>Points</span><b>{money(l.ownerPoints)}</b>
+                    <span>Auction cost basis</span><b>{money(l.ownerCost)}</b>
+                    <span>Country P/L</span><b className={countryProfit >= 0 ? "profit-positive" : "profit-negative"}>{money(countryProfit)}</b>
+                    <span>Status</span><b>Active</b>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </>
+              );
+            })}
+          </div>
         ) : <p className="muted">No countries yet.</p>}
       </div>
 
@@ -1266,7 +1349,7 @@ function Leaderboard({ participantsObj, scheduleObj, creditAdjustmentsObj, scori
       <div className="card table-card">
         <table className="desktop-table">
           <thead><tr><th>Rank</th><th>Participant</th><th>Profit</th><th>Points</th><th>Net Spent</th><th>Auction Spend</th><th>Trade Credits</th><th>Remaining</th><th>Holdings</th></tr></thead>
-          <tbody>{sorted.map((p, i) => <tr key={p.id}><td>{i + 1}</td><td><b>{p.name}</b></td><td><b>{money(p.profit)}</b></td><td>{money(p.points)}</td><td>{money(p.spent)}</td><td>{money(p.auctionSpent)}</td><td>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</td><td>{money(p.remaining)}</td><td>{p.holdings.length}</td></tr>)}</tbody>
+          <tbody>{sorted.map((p, i) => <tr key={p.id} className={i === 0 ? "leader-row" : ""}><td><span className={i === 0 ? "rank-pill leader" : "rank-pill"}>{i + 1}</span></td><td><b>{p.name}</b>{i === 0 && <span className="badge gold">Leader</span>}</td><td><b className={p.profit >= 0 ? "profit-positive" : "profit-negative"}>{money(p.profit)}</b></td><td>{money(p.points)}</td><td>{money(p.spent)}</td><td>{money(p.auctionSpent)}</td><td>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</td><td>{money(p.remaining)}</td><td>{p.holdings.length}</td></tr>)}</tbody>
         </table>
         <div className="mobile-cards leaderboard-cards">
           {sorted.map((p, i) => (
@@ -1316,6 +1399,7 @@ function validateTrade(trade, participants, lots, lockedCountryNames = new Set()
   const toShare = Number(trade.toShare || 0);
 
   if (fromCredits < 0 || toCredits < 0 || fromShare < 0 || toShare < 0) return "Credits and shares cannot be negative.";
+  if (fromCredits > 0 && toCredits > 0) return "Credits can only move in one direction within a trade. Use one net credit payment.";
   if (fromCredits > Number(from.remaining || 0)) return `${from.name} does not have enough remaining credits.`;
   if (toCredits > Number(to.remaining || 0)) return `${to.name} does not have enough remaining credits.`;
 
@@ -1363,6 +1447,8 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
   const [toCountryId, setToCountryId] = useState("");
   const [toShare, setToShare] = useState(0);
   const [toCredits, setToCredits] = useState(0);
+  const [showAllCompletedTrades, setShowAllCompletedTrades] = useState(false);
+  const [showAllRejectedTrades, setShowAllRejectedTrades] = useState(false);
 
   useEffect(() => {
     if (!counterpartyId && defaultCounterparty) setCounterpartyId(defaultCounterparty);
@@ -1378,6 +1464,8 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
   const awaitingAdmin = trades.filter((t) => t.status === "accepted");
   const completed = trades.filter((t) => t.status === "approved");
   const otherHistory = trades.filter((t) => ["rejected", "canceled", "adminRejected"].includes(t.status));
+  const visibleCompleted = showAllCompletedTrades ? completed : completed.slice(0, 5);
+  const visibleRejected = showAllRejectedTrades ? otherHistory : otherHistory.slice(0, 5);
 
   function resetForm() {
     setFromCountryId("");
@@ -1602,23 +1690,81 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
         </div>
       </div>
 
-      <div className="card">
-        <div className="space top-wrap"><h3><History size={18}/> Completed trade log</h3><span className="badge positive">{completed.length} approved</span></div>
-        {completed.length ? (
-          <div className="stack-list">
-            {completed.map((trade) => <TradeCard key={trade.id} trade={trade} />)}
-          </div>
-        ) : <p className="muted">No completed trades yet.</p>}
-      </div>
-
-      {otherHistory.length > 0 && (
+      <div className="grid two">
         <div className="card">
-          <h3>Rejected / canceled trades</h3>
-          <div className="stack-list">
-            {otherHistory.slice(0, 12).map((trade) => <TradeCard key={trade.id} trade={trade} />)}
-          </div>
+          <div className="space top-wrap"><h3><History size={18}/> Completed trade log</h3><span className="badge positive">{completed.length} approved</span></div>
+          <p className="muted small-text">Showing {visibleCompleted.length} of {completed.length} completed trades, newest first.</p>
+          {completed.length ? (
+            <>
+              <div className="stack-list">
+                {visibleCompleted.map((trade) => <TradeCard key={trade.id} trade={trade} />)}
+              </div>
+              {completed.length > 5 && <button className="secondary small log-toggle" onClick={() => setShowAllCompletedTrades(!showAllCompletedTrades)}>{showAllCompletedTrades ? "Show less" : "Show all completed trades"}</button>}
+            </>
+          ) : <p className="muted">No completed trades yet.</p>}
         </div>
-      )}
+
+        <div className="card">
+          <div className="space top-wrap"><h3>Rejected / canceled trades</h3><span className="badge neutral">{otherHistory.length}</span></div>
+          <p className="muted small-text">Showing {visibleRejected.length} of {otherHistory.length} rejected or canceled trades, newest first.</p>
+          {otherHistory.length ? (
+            <>
+              <div className="stack-list">
+                {visibleRejected.map((trade) => <TradeCard key={trade.id} trade={trade} />)}
+              </div>
+              {otherHistory.length > 5 && <button className="secondary small log-toggle" onClick={() => setShowAllRejectedTrades(!showAllRejectedTrades)}>{showAllRejectedTrades ? "Show less" : "Show all rejected/canceled trades"}</button>}
+            </>
+          ) : <p className="muted">No rejected or canceled trades yet.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function ScoringLog({ scoringEventsObj, matchesObj }) {
+  const events = useMemo(() => normalizeObj(scoringEventsObj)
+    .filter(isActiveScoringEvent)
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)), [scoringEventsObj]);
+  const matches = useMemo(() => Object.fromEntries(normalizeObj(matchesObj).map((m) => [m.id, m])), [matchesObj]);
+
+  return (
+    <div className="container grid">
+      <div className="card page-title scoring-log-title">
+        <p className="eyebrow">Audit trail</p>
+        <h2>Scoring Log</h2>
+        <p className="muted">Every automatic and manual point event lives here. This is the public record for why leaderboard points changed.</p>
+      </div>
+      <div className="card table-card">
+        {events.length ? (
+          <>
+            <table className="desktop-table scoring-log-table">
+              <thead><tr><th>Time</th><th>Event</th><th>Team</th><th>Points</th><th>Source</th><th>Status</th><th>Match</th></tr></thead>
+              <tbody>{events.map((event) => {
+                const match = event.matchId ? matches[event.matchId] : null;
+                return <tr key={event.id}>
+                  <td>{event.createdAt ? new Date(event.createdAt).toLocaleString() : "—"}</td>
+                  <td>{eventDisplayType(event.type)}</td>
+                  <td><b>{event.country}</b></td>
+                  <td><b>{money(event.points)}</b></td>
+                  <td>{event.source || "Ledger"}</td>
+                  <td><span className="badge positive">Applied</span></td>
+                  <td>{match ? `${match.home} vs ${match.away}` : event.matchId ? event.matchId : "Manual"}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+            <div className="mobile-cards scoring-log-cards">
+              {events.map((event) => {
+                const match = event.matchId ? matches[event.matchId] : null;
+                return <div className="mini-card" key={event.id}>
+                  <div className="space"><b>{event.country} +{money(event.points)}</b><span className="badge positive">Applied</span></div>
+                  <div className="mini-grid"><span>Event</span><b>{eventDisplayType(event.type)}</b><span>Source</span><b>{event.source || "Ledger"}</b><span>Time</span><b>{event.createdAt ? new Date(event.createdAt).toLocaleString() : "—"}</b><span>Match</span><b>{match ? `${match.home} vs ${match.away}` : event.matchId ? event.matchId : "Manual"}</b></div>
+                </div>;
+              })}
+            </div>
+          </>
+        ) : <p className="muted">No scoring events have been applied yet.</p>}
+      </div>
     </div>
   );
 }
@@ -1987,16 +2133,17 @@ function App() {
   return (
     <div className="app">
       <Header page={page} setPage={setPage} user={user} onLogout={logout} isAdmin={isAdmin} />
-      {page === "welcome" && <Welcome />}
+      {page === "welcome" && <Welcome participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} matchesObj={matchesObj} syncMetaObj={syncMetaObj} scoringEventsObj={scoringEventsObj} tradesObj={tradesObj} />}
       {page === "auction" && <Auction user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} auctionState={auctionState} scoringEventsObj={scoringEventsObj} />}
       {page === "schedule" && <AuctionSchedule scheduleObj={scheduleObj} scoringEventsObj={scoringEventsObj} />}
       {page === "matches" && <Matches user={user} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} matchesObj={matchesObj} syncMetaObj={syncMetaObj} scoringEventsObj={scoringEventsObj} settingsObj={settingsObj} />}
       {page === "portfolio" && <Portfolio user={user} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} scoringEventsObj={scoringEventsObj} />}
       {page === "ownership" && <CountryOwnership participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} scoringEventsObj={scoringEventsObj} />}
       {page === "leaderboard" && <Leaderboard participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} scoringEventsObj={scoringEventsObj} />}
+      {page === "scoring" && <ScoringLog scoringEventsObj={scoringEventsObj} matchesObj={matchesObj} />}
       {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
       {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} syncMetaObj={syncMetaObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
-      <div className="footer">v3E Public ESPN refresh + duplicate-proof scoring framework</div>
+      <div className="footer">v3F Visual polish + tournament UX cleanup</div>
     </div>
   );
 }
