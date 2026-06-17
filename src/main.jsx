@@ -39,6 +39,20 @@ const dbPath = (p) => ref(db, `leagues/${LEAGUE_ID}/${p}`);
 const slug = (name) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const normalizeObj = (obj) => obj ? Object.values(obj) : [];
 const money = (n) => Number(n || 0).toFixed(Number.isInteger(Number(n || 0)) ? 0 : 2);
+const PARTICIPANT_NAME_OVERRIDES = {
+  federico: "TJ Baller"
+};
+function canonicalParticipantName(participant) {
+  const idKey = String(participant?.id || "").toLowerCase();
+  const nameKey = String(participant?.name || "").toLowerCase().trim();
+  if (PARTICIPANT_NAME_OVERRIDES[idKey]) return PARTICIPANT_NAME_OVERRIDES[idKey];
+  if (PARTICIPANT_NAME_OVERRIDES[nameKey]) return PARTICIPANT_NAME_OVERRIDES[nameKey];
+  if (nameKey === "federico" || nameKey.includes("federico")) return "TJ Baller";
+  return participant?.name || participant?.id || "—";
+}
+function normalizeParticipant(participant) {
+  return { ...participant, name: canonicalParticipantName(participant) };
+}
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "—";
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" }) : "—";
 const formatTimer = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -86,7 +100,7 @@ function cleanShares(shares) {
 }
 
 function participantName(participants, id) {
-  return participants.find((p) => p.id === id)?.name || id || "—";
+  return canonicalParticipantName(participants.find((p) => p.id === id) || { id });
 }
 
 function getActiveMatches(matchesObj) {
@@ -547,7 +561,9 @@ function getLotPointsForParticipant(lot, participantId) {
 
 function deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj = {}, scoringEventsObj = {}) {
   const participants = normalizeObj(participantsObj)
-    .map((p) => ({
+    .map((raw) => {
+      const p = normalizeParticipant(raw);
+      return {
       ...p,
       auctionSpent: 0,
       tradeCreditNet: 0,
@@ -557,7 +573,8 @@ function deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj = {}, sc
       profit: 0,
       holdings: [],
       historicalPointsByCountry: {}
-    }))
+    };
+    })
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
   const byId = Object.fromEntries(participants.map((p) => [p.id, p]));
@@ -608,7 +625,9 @@ function deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj = {}, sc
   participants.forEach((p) => {
     p.remaining = Number(p.startingCredits ?? STARTING_CREDITS) - Number(p.auctionSpent || 0) + Number(p.tradeCreditNet || 0);
     p.spent = Number(p.startingCredits ?? STARTING_CREDITS) - Number(p.remaining || 0);
-    p.profit = Number(p.points || 0) - Number(p.spent || 0);
+    // Cash-balance profit model: credits are cash. This equals Points - Net Spent for normal auction/trade activity,
+    // but prevents circular credit transfers from manufacturing fake profit.
+    p.profit = Number(p.points || 0) + Number(p.remaining || 0) - Number(p.startingCredits ?? STARTING_CREDITS);
   });
 
   return { participants, lots, creditAdjustments, activeEvents };
@@ -671,7 +690,7 @@ function Login({ onLogin, participantsObj }) {
         <div className="welcome-summary compact-summary">
           <h3>How it works</h3>
           <p>Participants use fictional credits to buy World Cup countries in a live auction. Countries earn points from their actual World Cup performance. The winner is the participant with the highest profit.</p>
-          <p><b>Profit = Points Earned − Net Credits Spent.</b> Credits received in trades reduce net credits spent; credits sent increase net credits spent.</p>
+          <p><b>Profit = Points Earned + Remaining Credits − 45.</b> Credits are treated like cash, so unused credits still count and circular credit transfers cannot create fake profit.</p>
         </div>
       </div>
     </div>
@@ -763,7 +782,7 @@ function Welcome({ participantsObj, scheduleObj, creditAdjustmentsObj, matchesOb
           <h3>Rules & scoring</h3>
           <details open>
             <summary>Core format</summary>
-            <p className="muted">Each participant started with 45 credits. Profit = points earned − net credits spent. Credits received in trades reduce net credits spent; credits sent increase it.</p>
+            <p className="muted">Each participant started with 45 credits. Profit = points earned + remaining credits − 45. Credits are treated like cash, so unused credits still count toward profit.</p>
           </details>
           <details>
             <summary>Scoring table</summary>
@@ -1357,7 +1376,7 @@ function Leaderboard({ participantsObj, scheduleObj, creditAdjustmentsObj, scori
       <div className="card page-title">
         <p className="eyebrow">Standings · {sorted.length} participants</p>
         <h2>Leaderboard</h2>
-        <p className="muted">Profit = points earned − net credits spent. Credits received in trades reduce net credits spent; credits sent in trades increase it. Commissioner admin is excluded from rankings.</p>
+        <p className="muted">Profit = points earned + remaining credits − 45. Credits are treated like cash; unused credits retain value and circular credit transfers do not create profit. Commissioner admin is excluded from rankings.</p>
       </div>
       <div className="card table-card">
         <table className="desktop-table">
@@ -1413,6 +1432,7 @@ function validateTrade(trade, participants, lots, lockedCountryNames = new Set()
 
   if (fromCredits < 0 || toCredits < 0 || fromShare < 0 || toShare < 0) return "Credits and shares cannot be negative.";
   if (fromCredits > 0 && toCredits > 0) return "Credits can only move in one direction within a trade. Use one net credit payment.";
+  if (fromShare <= 0 && toShare <= 0) return "A valid trade must include at least one country-share transfer. Credit-only trades are blocked.";
   if (fromCredits > Number(from.remaining || 0)) return `${from.name} does not have enough remaining credits.`;
   if (toCredits > Number(to.remaining || 0)) return `${to.name} does not have enough remaining credits.`;
 
@@ -1443,6 +1463,50 @@ function validateTrade(trade, participants, lots, lockedCountryNames = new Set()
   }
 
   return null;
+}
+
+function buildTradeExecutionUpdates(trade, lots, approvedById, extraFields = {}) {
+  const updates = {};
+  const applyShareMove = (lotId, fromId, toId, share) => {
+    if (!lotId || Number(share || 0) <= 0) return;
+    const lot = lots.find((l) => l.id === lotId);
+    const shares = getLotShares(lot);
+    shares[fromId] = Number(shares[fromId] || 0) - Number(share);
+    shares[toId] = Number(shares[toId] || 0) + Number(share);
+    updates[`schedule/${lotId}/shares`] = cleanShares(shares);
+  };
+
+  applyShareMove(trade.fromCountryId, trade.fromParticipantId, trade.toParticipantId, Number(trade.fromShare || 0));
+  applyShareMove(trade.toCountryId, trade.toParticipantId, trade.fromParticipantId, Number(trade.toShare || 0));
+
+  const addCreditAdjustment = (participantId, amount, label) => {
+    if (!participantId || Number(amount || 0) === 0) return;
+    const adjRef = push(dbPath("creditAdjustments"));
+    updates[`creditAdjustments/${adjRef.key}`] = {
+      id: adjRef.key,
+      participantId,
+      amount: Number(amount),
+      reason: "trade",
+      tradeId: trade.id,
+      label,
+      createdAt: Date.now()
+    };
+  };
+
+  const fromCreditsNum = Number(trade.fromCredits || 0);
+  const toCreditsNum = Number(trade.toCredits || 0);
+  addCreditAdjustment(trade.fromParticipantId, -fromCreditsNum, "Credits sent in trade");
+  addCreditAdjustment(trade.toParticipantId, fromCreditsNum, "Credits received in trade");
+  addCreditAdjustment(trade.toParticipantId, -toCreditsNum, "Credits sent in trade");
+  addCreditAdjustment(trade.fromParticipantId, toCreditsNum, "Credits received in trade");
+
+  updates[`trades/${trade.id}/status`] = "approved";
+  updates[`trades/${trade.id}/approvedAt`] = Date.now();
+  updates[`trades/${trade.id}/approvedBy`] = approvedById;
+  Object.entries(extraFields || {}).forEach(([key, value]) => {
+    updates[`trades/${trade.id}/${key}`] = value;
+  });
+  return updates;
 }
 
 function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, settingsObj, matchesObj, scoringEventsObj }) {
@@ -1541,43 +1605,7 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
     if (validationError) return alert(`Trade cannot be approved: ${validationError}`);
     if (!confirm(`Approve this trade?\n\n${summarizeTrade(trade, participants, lots)}`)) return;
 
-    const updates = {};
-    const applyShareMove = (lotId, fromId, toId, share) => {
-      if (!lotId || Number(share || 0) <= 0) return;
-      const lot = lots.find((l) => l.id === lotId);
-      const shares = getLotShares(lot);
-      shares[fromId] = Number(shares[fromId] || 0) - Number(share);
-      shares[toId] = Number(shares[toId] || 0) + Number(share);
-      updates[`schedule/${lotId}/shares`] = cleanShares(shares);
-    };
-
-    applyShareMove(trade.fromCountryId, trade.fromParticipantId, trade.toParticipantId, Number(trade.fromShare || 0));
-    applyShareMove(trade.toCountryId, trade.toParticipantId, trade.fromParticipantId, Number(trade.toShare || 0));
-
-    const addCreditAdjustment = (participantId, amount, label) => {
-      if (!participantId || Number(amount || 0) === 0) return;
-      const adjRef = push(dbPath("creditAdjustments"));
-      updates[`creditAdjustments/${adjRef.key}`] = {
-        id: adjRef.key,
-        participantId,
-        amount: Number(amount),
-        reason: "trade",
-        tradeId: trade.id,
-        label,
-        createdAt: Date.now()
-      };
-    };
-
-    const fromCreditsNum = Number(trade.fromCredits || 0);
-    const toCreditsNum = Number(trade.toCredits || 0);
-    addCreditAdjustment(trade.fromParticipantId, -fromCreditsNum, "Credits sent in trade");
-    addCreditAdjustment(trade.toParticipantId, fromCreditsNum, "Credits received in trade");
-    addCreditAdjustment(trade.toParticipantId, -toCreditsNum, "Credits sent in trade");
-    addCreditAdjustment(trade.fromParticipantId, toCreditsNum, "Credits received in trade");
-
-    updates[`trades/${trade.id}/status`] = "approved";
-    updates[`trades/${trade.id}/approvedAt`] = Date.now();
-    updates[`trades/${trade.id}/approvedBy`] = user.id;
+    const updates = buildTradeExecutionUpdates(trade, lots, user.id);
     await update(leagueRoot(), collapseFirebaseUpdateConflicts(updates));
   }
 
@@ -1615,8 +1643,8 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
         <h3>How trading works</h3>
         <div className="rules-grid">
           <p><b>Country shares:</b> Countries can be traded in whole-number increments of 1%. You cannot send more of a country than you currently own.</p>
-          <p><b>Credits after the auction:</b> Credits are trading cash. Credits received reduce your net credits spent; credits sent increase your net credits spent.</p>
-          <p><b>Profit formula:</b> Profit = points earned − net credits spent. If you sell a share for credits and never re-spend those credits, the credits still help by lowering net spend.</p>
+          <p><b>Credits after the auction:</b> Credits are trading cash. They remain valuable because profit now includes remaining credits.</p>
+          <p><b>Profit formula:</b> Profit = points earned + remaining credits − 45. Credits may only move one way in a trade, and credit-only trades are blocked.</p>
           <p><b>Approval:</b> Proposed trades go to the other participant’s inbox. If accepted, admin must approve before shares or credits move.</p>
         </div>
       </div>
@@ -1788,6 +1816,8 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
   const matches = normalizeObj(matchesObj).sort((a, b) => String(a.dateTime || a.date || "").localeCompare(String(b.dateTime || b.date || "")));
   const activeEvents = normalizeObj(scoringEventsObj).filter(isActiveScoringEvent).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   const acceptedTrades = trades.filter((t) => t.status === "accepted").length;
+  const forceableTrades = trades.filter((t) => !["approved", "rejected", "adminRejected", "canceled"].includes(t.status));
+  const lockedCountryNames = useMemo(() => getLockedCountriesFromMatches(matchesObj), [matchesObj]);
   const pendingScoreMatches = matches.filter((m) => (m.statusType === "final" || m.completed) && m.scoringStatus !== "scored");
   const [startTime, setStartTime] = useState(new Date().toISOString().slice(0, 16));
   const [scoreCountry, setScoreCountry] = useState(countries[0].name);
@@ -1802,6 +1832,7 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
   const [manualWinner, setManualWinner] = useState("");
   const [groupWinnerTeams, setGroupWinnerTeams] = useState([]);
   const [advancedTeams, setAdvancedTeams] = useState([]);
+  const [forceTradeId, setForceTradeId] = useState("");
   const tradingOpen = settingsObj?.tradingOpen !== false;
 
   useEffect(() => {
@@ -1819,6 +1850,10 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
   useEffect(() => {
     if (!selectedMatchId && matches.length) setSelectedMatchId(matches[0].id);
   }, [matches, selectedMatchId]);
+
+  useEffect(() => {
+    if (!forceTradeId && forceableTrades.length) setForceTradeId(forceableTrades[0].id);
+  }, [forceTradeId, forceableTrades]);
 
   const selectedMatch = matches.find((m) => m.id === selectedMatchId);
 
@@ -1865,6 +1900,21 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
       createdAt: Date.now(),
       allocations: createCountryAllocations(lot.country, pointValue, participants, lots)
     });
+  }
+
+  async function forceApproveTrade() {
+    const trade = forceableTrades.find((t) => t.id === forceTradeId);
+    if (!trade) return alert("Choose a pending, proposed, or accepted trade to force through.");
+    const validationError = validateTrade(trade, participants, lots, lockedCountryNames);
+    if (validationError) return alert(`Trade cannot be forced through: ${validationError}`);
+    if (!confirm(`Force approve and execute this trade?\n\n${summarizeTrade(trade, participants, lots)}\n\nThis bypasses participant acceptance status but still enforces ownership, available credits, one-way credits, and no credit-only trades.`)) return;
+    const updates = buildTradeExecutionUpdates(trade, lots, "admin", {
+      forceApproved: true,
+      forcedFromStatus: trade.status || "unknown",
+      forceApprovedAt: Date.now()
+    });
+    await update(leagueRoot(), collapseFirebaseUpdateConflicts(updates));
+    alert("Trade forced through and executed.");
   }
 
   async function saveCountryCorrection() {
@@ -2018,6 +2068,15 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
         <h2>Admin Setup</h2>
         <p className="muted">Commissioner controls for auction corrections, trading status, scoring review, and manual scoring overrides.</p>
         {acceptedTrades > 0 && <p className="notice"><b>{acceptedTrades}</b> accepted trade{acceptedTrades === 1 ? "" : "s"} awaiting final approval in the Trading tab.</p>}
+
+        <h3>Force trade execution</h3>
+        <p className="muted small-text">Commissioner-only override. Use only for trades that should be executed even if the normal accept/approve workflow got stuck. This still blocks credit-only trades, two-way credits, insufficient credits, and insufficient shares.</p>
+        <div className="row wrap-row">
+          <select value={forceTradeId} onChange={(e) => setForceTradeId(e.target.value)}>
+            {forceableTrades.length ? forceableTrades.map((trade) => <option key={trade.id} value={trade.id}>{trade.status || "pending"} · {summarizeTrade(trade, participants, lots)}</option>) : <option value="">No forceable trades</option>}
+          </select>
+          <button className="secondary" onClick={forceApproveTrade} disabled={!forceableTrades.length}><ShieldCheck size={15}/> Force approve & execute</button>
+        </div>
 
         <h3>Initialize schedule</h3>
         <div className="row"><input type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} /><button onClick={initSchedule}><RefreshCw size={15} /> Initialize / Reset Schedule</button></div>
