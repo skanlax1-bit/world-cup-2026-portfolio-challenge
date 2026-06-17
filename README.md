@@ -1,16 +1,23 @@
-# v3F.1 Fixture Layout Hotfix
+# World Cup 2026 Portfolio Challenge — v3F.2 Profit Formula + Commissioner Trade Tools
 
-This package fixes the v3F Matches page layout on both web and mobile.
+This patch builds on v3F.1 and keeps the live scoring engine unchanged.
 
-## What changed
+## Included changes
 
-- Replaces the broken match scorecard layout that smashed teams/scores/venues together.
-- Keeps Today / Upcoming / Completed sections.
-- Uses clear fixture rows/cards with separate status, teams, kickoff, venue, and scoring fields.
-- Keeps ESPN refresh and scoring logic unchanged.
-- Keeps v3F Scoring Log, Home dashboard, Trade Log cleanup, and leaderboard behavior.
+- Profit formula updated across the Home page and Leaderboard:
+  - `Profit = Points Earned + Remaining Credits - 45`
+  - Credits are treated like cash, so unused credits retain value and circular credit transfers cannot create fake profit.
+- Federico display name override:
+  - Existing participant displayed as `TJ Baller` anywhere the app derives participant names.
+- Trade validation tightened:
+  - credit-only trades are blocked.
+  - credits can only move one way in a normal trade.
+  - each side must still send something in the trade.
+- Commissioner force trade execution tool added in Admin:
+  - can force approve/execute a pending, proposed, or accepted trade if normal workflow gets stuck.
+  - still enforces ownership, available credits, one-way credits, no credit-only trades, and locked-country restrictions.
 
-## Upload
+## Install notes
 
 Upload/update:
 
@@ -20,4 +27,4 @@ Upload/update:
 - `api/espn-schedule.js`
 - `README.md`
 
-Do not replace `src/firebase.js`.
+Do not replace your live `src/firebase.js` file.
