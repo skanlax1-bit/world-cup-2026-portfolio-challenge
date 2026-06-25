@@ -238,7 +238,24 @@ function isRealAppCountry(name) {
   return APP_COUNTRY_SET.has(name);
 }
 
-function isKnockoutStage(stage) {
+function stageFromMatchDate(match) {
+  const isoDate = String(match?.date || match?.dateTime || "").slice(0, 10);
+  if (isoDate >= "2026-06-28" && isoDate <= "2026-07-03") return "Round of 32";
+  if (isoDate >= "2026-07-04" && isoDate <= "2026-07-07") return "Round of 16";
+  if (isoDate >= "2026-07-09" && isoDate <= "2026-07-11") return "Quarterfinal";
+  if (isoDate >= "2026-07-14" && isoDate <= "2026-07-15") return "Semifinal";
+  if (isoDate === "2026-07-19") return "Final";
+  return "";
+}
+
+function effectiveKnockoutStage(match) {
+  const dateStage = stageFromMatchDate(match);
+  if (dateStage) return dateStage;
+  return match?.stage || "";
+}
+
+function isKnockoutStage(stageOrMatch) {
+  const stage = typeof stageOrMatch === "object" ? effectiveKnockoutStage(stageOrMatch) : stageOrMatch;
   return Boolean(KNOCKOUT_POINTS[stage]);
 }
 
@@ -1352,17 +1369,18 @@ function BracketTeamRow({ team, score, isWinner, participants, lots }) {
 function BracketMatchCard({ match, participants, lots }) {
   const [homeScore, awayScore] = bracketScoreParts(match);
   const winner = match.winnerCountry || "";
-  const pointsAvailable = KNOCKOUT_POINTS[match.stage] || 0;
-  const isFinalMatch = match.stage === "Final";
+  const displayStage = effectiveKnockoutStage(match);
+  const pointsAvailable = KNOCKOUT_POINTS[displayStage] || 0;
+  const isFinalMatch = displayStage === "Final";
   const statusLabel = match.statusDisplay || (match.completed ? "Final" : "Not Started");
   const progressionText = match.statusType === "final" && winner
-    ? `${winner} advances${isFinalMatch ? " as champion" : ` to ${nextRoundLabel(match.stage)}`}`
-    : `Winner advances to ${nextRoundLabel(match.stage)}`;
+    ? `${winner} advances${isFinalMatch ? " as champion" : ` to ${nextRoundLabel(displayStage)}`}`
+    : `Winner advances to ${nextRoundLabel(displayStage)}`;
 
   return (
     <div className={`bracket-match-card ${match.statusType || "not_started"}`}>
       <div className="bracket-card-topline">
-        <span className="bracket-round-pill">{roundShortLabel(match.stage)} · +{pointsAvailable} pts</span>
+        <span className="bracket-round-pill">{roundShortLabel(displayStage)} · +{pointsAvailable} pts</span>
         <span className={`badge ${statusBadgeClass(match)}`}>{statusLabel}</span>
       </div>
       <div className="bracket-teams">
@@ -1383,8 +1401,8 @@ function BracketMatchCard({ match, participants, lots }) {
 function Bracket({ participantsObj, scheduleObj, creditAdjustmentsObj, matchesObj, scoringEventsObj, syncMetaObj }) {
   const { participants, lots } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj), [participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj]);
   const matches = useMemo(() => getActiveMatches(matchesObj), [matchesObj]);
-  const knockoutMatches = useMemo(() => sortKnockoutMatches(matches.filter((m) => isKnockoutStage(m.stage))), [matches]);
-  const matchesByRound = useMemo(() => Object.fromEntries(BRACKET_ROUNDS.map((round) => [round, knockoutMatches.filter((m) => m.stage === round)])), [knockoutMatches]);
+  const knockoutMatches = useMemo(() => sortKnockoutMatches(matches.filter((m) => isKnockoutStage(m))), [matches]);
+  const matchesByRound = useMemo(() => Object.fromEntries(BRACKET_ROUNDS.map((round) => [round, knockoutMatches.filter((m) => effectiveKnockoutStage(m) === round)])), [knockoutMatches]);
   const knownTeamCount = knockoutMatches.reduce((sum, match) => sum + getMatchCountries(match).length, 0);
   const lastSyncAt = Number(syncMetaObj?.lastMatchSyncAt || syncMetaObj?.lastScheduleSyncAt || 0);
 
@@ -2421,7 +2439,7 @@ function App() {
       {page === "scoring" && <ScoringLog scoringEventsObj={scoringEventsObj} matchesObj={matchesObj} />}
       {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
       {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} syncMetaObj={syncMetaObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
-      <div className="footer">v3G Knockout bracket + ownership wheels</div>
+      <div className="footer">v3G.1 Bracket stage/team loading hotfix</div>
     </div>
   );
 }
