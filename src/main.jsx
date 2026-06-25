@@ -263,6 +263,38 @@ function isRealAppCountry(name) {
   return APP_COUNTRY_SET.has(name);
 }
 
+
+function normalizeBracketPlaceholderName(name) {
+  const value = String(name || "").replace(/\s+/g, " ").trim();
+  if (!value || /^TBD$/i.test(value)) return "TBD";
+
+  let match = value.match(/^([12])\s*([A-L])$/i);
+  if (match) return `Group ${match[2].toUpperCase()} ${match[1] === "1" ? "Winner" : "2nd Place"}`;
+
+  match = value.match(/^3(?:RD)?\s+([A-L](?:\/[A-L])*)$/i);
+  if (match) return `Third Place Group ${match[1].toUpperCase()}`;
+
+  match = value.match(/^3(?:RD)?\s+(?:Place\s+)?Group\s+([A-L](?:\/[A-L])*)$/i);
+  if (match) return `Third Place Group ${match[1].toUpperCase()}`;
+
+  match = value.match(/^RD\s*32\s*W\s*(\d+)$/i);
+  if (match) return `Round of 32 ${Number(match[1])} Winner`;
+
+  match = value.match(/^RD\s*16\s*W\s*(\d+)$/i);
+  if (match) return `Round of 16 ${Number(match[1])} Winner`;
+
+  match = value.match(/^QF\s*W\s*(\d+)$/i);
+  if (match) return `Quarterfinal ${Number(match[1])} Winner`;
+
+  match = value.match(/^SF\s*W\s*(\d+)$/i);
+  if (match) return `Semifinal ${Number(match[1])} Winner`;
+
+  match = value.match(/^SF\s*L\s*(\d+)$/i);
+  if (match) return `Semifinal ${Number(match[1])} Loser`;
+
+  return "";
+}
+
 function easternDateKey(value) {
   if (!value) return "";
   const raw = String(value);
@@ -319,7 +351,7 @@ function countryFlag(name) {
 
 function isBracketPlaceholderName(name) {
   const value = String(name || "").trim();
-  if (!value || value === "TBD") return true;
+  if (!value || /^TBD$/i.test(value) || normalizeBracketPlaceholderName(value)) return true;
   return !isRealAppCountry(value);
 }
 
@@ -1406,11 +1438,11 @@ function Matches({ user, participantsObj, scheduleObj, creditAdjustmentsObj, tra
         </div>
       </div>
 
-      {syncMetaObj?.unmatchedTeams?.length > 0 && (
+      {syncMetaObj?.unmatchedTeams?.filter((team) => !isBracketPlaceholderName(team)).length > 0 && (
         <div className="card warning-card">
           <h3><AlertTriangle size={18}/> ESPN team mapping warnings</h3>
           <p className="muted">These ESPN team names did not cleanly map to app countries. Review before using imported data for scoring.</p>
-          <div className="tag-row">{syncMetaObj.unmatchedTeams.map((team) => <span className="badge neutral" key={team}>{team}</span>)}</div>
+          <div className="tag-row">{syncMetaObj.unmatchedTeams.filter((team) => !isBracketPlaceholderName(team)).map((team) => <span className="badge neutral" key={team}>{team}</span>)}</div>
         </div>
       )}
 
@@ -1492,13 +1524,14 @@ function OwnershipWheel({ country, participants, lots, colorMap }) {
 }
 
 function BracketTeamRow({ team, score, isWinner, participants, lots, colorMap }) {
-  const placeholder = isBracketPlaceholderName(team);
+  const displayTeam = normalizeBracketPlaceholderName(team) || team || "TBD";
+  const placeholder = isBracketPlaceholderName(displayTeam);
   return (
     <div className={`bracket-team-row ${isWinner ? "winner" : ""} ${placeholder ? "placeholder" : ""}`}>
-      <span className="bracket-flag">{placeholder ? "🏳️" : countryFlag(team)}</span>
-      <span className="bracket-team-name">{team || "TBD"}</span>
+      <span className="bracket-flag">{placeholder ? "🏳️" : countryFlag(displayTeam)}</span>
+      <span className="bracket-team-name">{displayTeam}</span>
       <span className="bracket-team-score">{score}</span>
-      <OwnershipWheel country={team} participants={participants} lots={lots} colorMap={colorMap} />
+      <OwnershipWheel country={displayTeam} participants={participants} lots={lots} colorMap={colorMap} />
     </div>
   );
 }
@@ -2551,7 +2584,7 @@ function App() {
       {page === "scoring" && <ScoringLog scoringEventsObj={scoringEventsObj} matchesObj={matchesObj} />}
       {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
       {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} syncMetaObj={syncMetaObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
-      <div className="footer">v3G.5 Bracket card containment + ownership popover fix</div>
+      <div className="footer">v3G.7 Bracket placeholder/team mapping fix</div>
     </div>
   );
 }
