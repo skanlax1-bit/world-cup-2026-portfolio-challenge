@@ -199,6 +199,28 @@ const KNOCKOUT_POINTS = {
   "Final": 34
 };
 
+const BRACKET_ROUNDS = ["Round of 32", "Round of 16", "Quarterfinal", "Semifinal", "Final"];
+const ROUND_SHORT_LABELS = {
+  "Round of 32": "R32",
+  "Round of 16": "R16",
+  "Quarterfinal": "QF",
+  "Semifinal": "SF",
+  "Final": "Final"
+};
+const COUNTRY_FLAGS = {
+  "France": "🇫🇷", "Spain": "🇪🇸", "England": "🏴", "Portugal": "🇵🇹", "Germany": "🇩🇪",
+  "Brazil": "🇧🇷", "Argentina": "🇦🇷", "Netherlands": "🇳🇱", "Norway": "🇳🇴", "Türkiye": "🇹🇷",
+  "Senegal": "🇸🇳", "Belgium": "🇧🇪", "Uruguay": "🇺🇾", "Morocco": "🇲🇦", "Ecuador": "🇪🇨",
+  "Croatia": "🇭🇷", "Ivory Coast": "🇨🇮", "Colombia": "🇨🇴", "Switzerland": "🇨🇭", "Sweden": "🇸🇪",
+  "Japan": "🇯🇵", "United States": "🇺🇸", "Austria": "🇦🇹", "Mexico": "🇲🇽", "Canada": "🇨🇦",
+  "Algeria": "🇩🇿", "Paraguay": "🇵🇾", "Scotland": "🏴", "Czechia": "🇨🇿", "South Korea": "🇰🇷",
+  "Egypt": "🇪🇬", "Australia": "🇦🇺", "Congo DR": "🇨🇩", "Uzbekistan": "🇺🇿", "Iran": "🇮🇷",
+  "Ghana": "🇬🇭", "Bosnia and Herzegovina": "🇧🇦", "Panama": "🇵🇦", "Tunisia": "🇹🇳", "Jordan": "🇯🇴",
+  "New Zealand": "🇳🇿", "Iraq": "🇮🇶", "Cape Verde": "🇨🇻", "Saudi Arabia": "🇸🇦", "Haiti": "🇭🇹",
+  "South Africa": "🇿🇦", "Curaçao": "🇨🇼", "Qatar": "🇶🇦"
+};
+const OWNERSHIP_COLORS = ["#0f62fe", "#22c55e", "#f59e0b", "#ef4444", "#7c3aed", "#06b6d4", "#f97316", "#14b8a6", "#64748b", "#ec4899"];
+
 function eventSafeId(value) {
   return String(value || "")
     .normalize("NFD")
@@ -218,6 +240,62 @@ function isRealAppCountry(name) {
 
 function isKnockoutStage(stage) {
   return Boolean(KNOCKOUT_POINTS[stage]);
+}
+
+function countryFlag(name) {
+  return COUNTRY_FLAGS[name] || "🏳️";
+}
+
+function isBracketPlaceholderName(name) {
+  const value = String(name || "").trim();
+  if (!value || value === "TBD") return true;
+  return !isRealAppCountry(value);
+}
+
+function roundShortLabel(round) {
+  return ROUND_SHORT_LABELS[round] || round || "KO";
+}
+
+function nextRoundLabel(round) {
+  const index = BRACKET_ROUNDS.indexOf(round);
+  return index >= 0 && index < BRACKET_ROUNDS.length - 1 ? BRACKET_ROUNDS[index + 1] : "Champion";
+}
+
+function ownershipEntriesForCountry(country, participants, lots) {
+  const lot = lots.find((l) => l.country === country);
+  if (!lot || !isRealAppCountry(country)) return [];
+  return Object.entries(getLotShares(lot))
+    .map(([participantId, share], index) => ({
+      participantId,
+      name: participantName(participants, participantId),
+      share: Number(share || 0),
+      color: OWNERSHIP_COLORS[index % OWNERSHIP_COLORS.length]
+    }))
+    .filter((entry) => entry.share > 0)
+    .sort((a, b) => b.share - a.share);
+}
+
+function ownershipWheelStyle(entries) {
+  if (!entries.length) return { background: "#d7dfeb" };
+  let cursor = 0;
+  const slices = entries.map((entry) => {
+    const start = cursor;
+    cursor += Math.max(0, Number(entry.share || 0));
+    return `${entry.color} ${start}% ${Math.min(cursor, 100)}%`;
+  });
+  if (cursor < 100) slices.push(`#e5eaf2 ${cursor}% 100%`);
+  return { background: `conic-gradient(${slices.join(", ")})` };
+}
+
+function bracketScoreParts(match) {
+  const score = scoreText(match);
+  if (score === "—") return ["—", "—"];
+  const [homeScore, awayScore] = String(score).split("–");
+  return [homeScore || "0", awayScore || "0"];
+}
+
+function sortKnockoutMatches(matches) {
+  return [...matches].sort((a, b) => matchSortTime(a) - matchSortTime(b) || String(a.id || "").localeCompare(String(b.id || "")));
 }
 
 function getMatchCountries(match) {
@@ -635,6 +713,7 @@ function deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj = {}, sc
 
 function Login({ onLogin, participantsObj }) {
   const participants = useMemo(() => normalizeObj(participantsObj)
+    .map(normalizeParticipant)
     .sort((a, b) => {
       if (a.id === "admin") return -1;
       if (b.id === "admin") return 1;
@@ -703,6 +782,7 @@ function Header({ page, setPage, user, onLogout, isAdmin }) {
     ["auction", "Auction", Gavel],
     ["schedule", "Auction Schedule", ListChecks],
     ["matches", "Matches", CalendarDays],
+    ["bracket", "Bracket", Trophy],
     ["portfolio", "Portfolios", Wallet],
     ["ownership", "Ownership", Users],
     ["leaderboard", "Leaderboard", BarChart3],
@@ -1236,6 +1316,131 @@ function Matches({ user, participantsObj, scheduleObj, creditAdjustmentsObj, tra
   );
 }
 
+
+function OwnershipWheel({ country, participants, lots }) {
+  const entries = ownershipEntriesForCountry(country, participants, lots);
+  if (!isRealAppCountry(country)) return <span className="ownership-wheel placeholder-wheel" title="Ownership will appear once a real country is assigned." />;
+  return (
+    <span className="ownership-wheel-wrap" tabIndex={0} aria-label={`${country} ownership`}>
+      <span className="ownership-wheel" style={ownershipWheelStyle(entries)} />
+      <span className="ownership-popover">
+        <b>{country} ownership</b>
+        {entries.length ? entries.map((entry) => (
+          <span className="ownership-popover-line" key={entry.participantId}>
+            <i style={{ background: entry.color }} />
+            <span>{entry.name}</span>
+            <strong>{money(entry.share)}%</strong>
+          </span>
+        )) : <span className="muted small-text">No current ownership found.</span>}
+      </span>
+    </span>
+  );
+}
+
+function BracketTeamRow({ team, score, isWinner, participants, lots }) {
+  const placeholder = isBracketPlaceholderName(team);
+  return (
+    <div className={`bracket-team-row ${isWinner ? "winner" : ""} ${placeholder ? "placeholder" : ""}`}>
+      <span className="bracket-flag">{placeholder ? "🏳️" : countryFlag(team)}</span>
+      <span className="bracket-team-name">{team || "TBD"}</span>
+      <span className="bracket-team-score">{score}</span>
+      <OwnershipWheel country={team} participants={participants} lots={lots} />
+    </div>
+  );
+}
+
+function BracketMatchCard({ match, participants, lots }) {
+  const [homeScore, awayScore] = bracketScoreParts(match);
+  const winner = match.winnerCountry || "";
+  const pointsAvailable = KNOCKOUT_POINTS[match.stage] || 0;
+  const isFinalMatch = match.stage === "Final";
+  const statusLabel = match.statusDisplay || (match.completed ? "Final" : "Not Started");
+  const progressionText = match.statusType === "final" && winner
+    ? `${winner} advances${isFinalMatch ? " as champion" : ` to ${nextRoundLabel(match.stage)}`}`
+    : `Winner advances to ${nextRoundLabel(match.stage)}`;
+
+  return (
+    <div className={`bracket-match-card ${match.statusType || "not_started"}`}>
+      <div className="bracket-card-topline">
+        <span className="bracket-round-pill">{roundShortLabel(match.stage)} · +{pointsAvailable} pts</span>
+        <span className={`badge ${statusBadgeClass(match)}`}>{statusLabel}</span>
+      </div>
+      <div className="bracket-teams">
+        <BracketTeamRow team={match.home} score={homeScore} isWinner={winner === match.home} participants={participants} lots={lots} />
+        <BracketTeamRow team={match.away} score={awayScore} isWinner={winner === match.away} participants={participants} lots={lots} />
+      </div>
+      <div className="bracket-card-meta">
+        <span>{match.displayDate || fmtDate(match.dateTime)} · {match.time || fmtTime(match.dateTime)}</span>
+        <span>{match.venue || "Venue TBD"}</span>
+      </div>
+      <div className="bracket-card-footer">
+        <span>{progressionText}</span>
+      </div>
+    </div>
+  );
+}
+
+function Bracket({ participantsObj, scheduleObj, creditAdjustmentsObj, matchesObj, scoringEventsObj, syncMetaObj }) {
+  const { participants, lots } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj), [participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj]);
+  const matches = useMemo(() => getActiveMatches(matchesObj), [matchesObj]);
+  const knockoutMatches = useMemo(() => sortKnockoutMatches(matches.filter((m) => isKnockoutStage(m.stage))), [matches]);
+  const matchesByRound = useMemo(() => Object.fromEntries(BRACKET_ROUNDS.map((round) => [round, knockoutMatches.filter((m) => m.stage === round)])), [knockoutMatches]);
+  const knownTeamCount = knockoutMatches.reduce((sum, match) => sum + getMatchCountries(match).length, 0);
+  const lastSyncAt = Number(syncMetaObj?.lastMatchSyncAt || syncMetaObj?.lastScheduleSyncAt || 0);
+
+  return (
+    <div className="container grid bracket-page">
+      <div className="card page-title bracket-hero">
+        <p className="eyebrow">Knockout path</p>
+        <div className="space top-wrap">
+          <div>
+            <h2>World Cup Bracket</h2>
+            <p className="muted">Track the knockout path, live scores, match times, winner points, and portfolio ownership in one bracket view.</p>
+          </div>
+          <div className="bracket-summary-stack">
+            <span className="badge positive">{knockoutMatches.length} knockout matches loaded</span>
+            <span className="badge neutral">{knownTeamCount} real country slots</span>
+            <small>{lastSyncAt ? `Last ESPN sync ${new Date(lastSyncAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Refresh ESPN data on Matches tab"}</small>
+          </div>
+        </div>
+      </div>
+
+      <div className="card bracket-notes-card">
+        <div className="rules-grid bracket-rules-grid">
+          <p><b>Points at stake:</b> R32 +5, R16 +9, Quarterfinal +15, Semifinal +22, Final +34.</p>
+          <p><b>Ownership wheels:</b> small pie wheels show who owns each team. Hover on desktop or tap/focus on mobile to expand ownership.</p>
+          <p><b>Data source:</b> bracket cards use the same synced ESPN match data as the Matches tab, not a separate scoring engine.</p>
+        </div>
+      </div>
+
+      {knockoutMatches.length ? (
+        <div className="bracket-board card">
+          {BRACKET_ROUNDS.map((round) => {
+            const roundMatches = matchesByRound[round] || [];
+            return (
+              <div className="bracket-round-column" key={round}>
+                <div className="bracket-round-header">
+                  <h3>{round}</h3>
+                  <span className="badge neutral">+{KNOCKOUT_POINTS[round]} pts</span>
+                </div>
+                <div className="bracket-round-matches">
+                  {roundMatches.length ? roundMatches.map((match) => (
+                    <BracketMatchCard key={match.id || match.espnEventId} match={match} participants={participants} lots={lots} />
+                  )) : <div className="bracket-empty-slot">Waiting for ESPN bracket slots</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="card empty-bracket-card">
+          <h3>Bracket not loaded yet</h3>
+          <p className="muted">Use Refresh ESPN Match Data on the Matches tab once knockout fixtures appear. The Bracket tab will populate automatically from those synced matches.</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Portfolio({ user, participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj }) {
   const { participants, lots } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj), [participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj]);
@@ -2209,13 +2414,14 @@ function App() {
       {page === "auction" && <Auction user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} auctionState={auctionState} scoringEventsObj={scoringEventsObj} />}
       {page === "schedule" && <AuctionSchedule scheduleObj={scheduleObj} scoringEventsObj={scoringEventsObj} />}
       {page === "matches" && <Matches user={user} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} matchesObj={matchesObj} syncMetaObj={syncMetaObj} scoringEventsObj={scoringEventsObj} settingsObj={settingsObj} />}
+      {page === "bracket" && <Bracket participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} syncMetaObj={syncMetaObj} />}
       {page === "portfolio" && <Portfolio user={user} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} scoringEventsObj={scoringEventsObj} />}
       {page === "ownership" && <CountryOwnership participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} scoringEventsObj={scoringEventsObj} />}
       {page === "leaderboard" && <Leaderboard participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} scoringEventsObj={scoringEventsObj} />}
       {page === "scoring" && <ScoringLog scoringEventsObj={scoringEventsObj} matchesObj={matchesObj} />}
       {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
       {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} syncMetaObj={syncMetaObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
-      <div className="footer">v3F Visual polish + tournament UX cleanup</div>
+      <div className="footer">v3G Knockout bracket + ownership wheels</div>
     </div>
   );
 }
