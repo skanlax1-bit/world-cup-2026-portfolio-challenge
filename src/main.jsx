@@ -238,24 +238,53 @@ function isRealAppCountry(name) {
   return APP_COUNTRY_SET.has(name);
 }
 
+function easternDateKey(value) {
+  if (!value) return "";
+  const raw = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw.slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date).reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 function stageFromMatchDate(match) {
-  const isoDate = String(match?.date || match?.dateTime || "").slice(0, 10);
-  if (isoDate >= "2026-06-28" && isoDate <= "2026-07-03") return "Round of 32";
-  if (isoDate >= "2026-07-04" && isoDate <= "2026-07-07") return "Round of 16";
-  if (isoDate >= "2026-07-09" && isoDate <= "2026-07-11") return "Quarterfinal";
-  if (isoDate >= "2026-07-14" && isoDate <= "2026-07-15") return "Semifinal";
-  if (isoDate === "2026-07-19") return "Final";
+  const dateKey = easternDateKey(match?.dateTime || match?.kickoff || match?.date || "");
+  if (dateKey >= "2026-06-28" && dateKey <= "2026-07-03") return "Round of 32";
+  if (dateKey >= "2026-07-04" && dateKey <= "2026-07-07") return "Round of 16";
+  if (dateKey >= "2026-07-09" && dateKey <= "2026-07-11") return "Quarterfinal";
+  if (dateKey >= "2026-07-14" && dateKey <= "2026-07-15") return "Semifinal";
+  if (dateKey === "2026-07-18") return "Third Place";
+  if (dateKey === "2026-07-19") return "Final";
+  return "";
+}
+
+function normalizedRoundName(stage) {
+  const value = String(stage || "").trim().toLowerCase();
+  if (/round\s+of\s+32|\br32\b/.test(value)) return "Round of 32";
+  if (/round\s+of\s+16|\br16\b/.test(value)) return "Round of 16";
+  if (/quarter/.test(value)) return "Quarterfinal";
+  if (/semi/.test(value)) return "Semifinal";
+  if (value === "final" || value === "final match") return "Final";
+  if (/third/.test(value)) return "Third Place";
   return "";
 }
 
 function effectiveKnockoutStage(match) {
   const dateStage = stageFromMatchDate(match);
+  // Date is the most reliable guardrail because late-night Eastern group games can be the next UTC day,
+  // and ESPN sometimes labels the tournament generically as World Cup Finals.
   if (dateStage) return dateStage;
-  return match?.stage || "";
+  return normalizedRoundName(match?.stage);
 }
 
 function isKnockoutStage(stageOrMatch) {
-  const stage = typeof stageOrMatch === "object" ? effectiveKnockoutStage(stageOrMatch) : stageOrMatch;
+  const stage = typeof stageOrMatch === "object" ? effectiveKnockoutStage(stageOrMatch) : normalizedRoundName(stageOrMatch);
   return Boolean(KNOCKOUT_POINTS[stage]);
 }
 
@@ -2439,7 +2468,7 @@ function App() {
       {page === "scoring" && <ScoringLog scoringEventsObj={scoringEventsObj} matchesObj={matchesObj} />}
       {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
       {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} syncMetaObj={syncMetaObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
-      <div className="footer">v3G.1 Bracket stage/team loading hotfix</div>
+      <div className="footer">v3G.2 Bracket date-stage loading hotfix</div>
     </div>
   );
 }
