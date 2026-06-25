@@ -70,3 +70,21 @@ Fixes included:
 - Prevents ESPN generic “World Cup Finals” labels from pushing Round of 16/Quarterfinal/Semifinal matches into the Final column.
 - Excludes the Third Place match from the main bracket columns.
 - After deploy, run Refresh ESPN Match Data once to overwrite any previously synced bad stage values.
+
+
+## v3G.3 Connected Bracket + Ownership Colors
+
+This update changes the Bracket tab from round-by-round lists into a connected bracket tree with visual progression lines. It also assigns each participant a stable unique color for ownership wheels so the same participant uses the same color across every country.
+
+### Included
+- ESPN-style connected bracket tree layout.
+- Horizontal scroll on mobile and narrow screens.
+- Round jump buttons at the top of the bracket.
+- Compact bracket cards with flags, scores/status, kickoff time, venue, points available, and progression text.
+- Stable unique participant color map for team ownership wheels and popovers.
+- Preserves the v3G.2 date/stage fixes for bracket round assignment.
+
+### Excluded
+- No markets, wagers, options, or shorting.
+- No scoring formula changes.
+- No changes to Firebase credentials. Keep your existing src/firebase.js.
