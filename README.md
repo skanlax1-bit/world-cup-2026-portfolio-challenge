@@ -1,23 +1,41 @@
-# World Cup 2026 Portfolio Challenge — v3F.2 Profit Formula + Commissioner Trade Tools
+# World Cup 2026 Portfolio Challenge — v3G Knockout Bracket
 
-This patch builds on v3F.1 and keeps the live scoring engine unchanged.
+This update adds a new Bracket tab focused on the knockout rounds while preserving the existing ESPN sync and scoring engine.
 
-## Included changes
+## Included
 
-- Profit formula updated across the Home page and Leaderboard:
-  - `Profit = Points Earned + Remaining Credits - 45`
-  - Credits are treated like cash, so unused credits retain value and circular credit transfers cannot create fake profit.
-- Federico display name override:
-  - Existing participant displayed as `TJ Baller` anywhere the app derives participant names.
-- Trade validation tightened:
-  - credit-only trades are blocked.
-  - credits can only move one way in a normal trade.
-  - each side must still send something in the trade.
-- Commissioner force trade execution tool added in Admin:
-  - can force approve/execute a pending, proposed, or accepted trade if normal workflow gets stuck.
-  - still enforces ownership, available credits, one-way credits, no credit-only trades, and locked-country restrictions.
+- New Bracket tab in the main navigation.
+- Bracket columns for:
+  - Round of 32
+  - Round of 16
+  - Quarterfinal
+  - Semifinal
+  - Final
+- Knockout match cards using the same ESPN-synced match data as the Matches tab.
+- Each bracket card shows:
+  - country names or placeholders
+  - flags
+  - live/final score
+  - match status
+  - match time
+  - venue
+  - points available to the winner
+  - winner progression text
+- Ownership wheels beside each real country.
+  - Hover on desktop or tap/focus on mobile to expand ownership details.
+- Bracket uses existing ownership and scoring data only; it does not create a separate scoring engine.
+- Login dropdown now also applies the Federico → TJ Baller display-name override.
 
-## Install notes
+## Excluded intentionally
+
+- No live markets tab.
+- No wagers.
+- No options.
+- No shorting.
+- No scoring formula changes.
+- No new automatic scoring logic.
+
+## Upload notes
 
 Upload/update:
 
