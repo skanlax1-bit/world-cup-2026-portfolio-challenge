@@ -225,7 +225,7 @@ const OWNERSHIP_COLORS = [
   "#15803d", "#b91c1c", "#0d9488", "#c026d3", "#d97706", "#0369a1", "#a21caf", "#475569"
 ];
 const BRACKET_CARD_WIDTH = 218;
-const BRACKET_CARD_HEIGHT = 106;
+const BRACKET_CARD_HEIGHT = 132;
 const BRACKET_COLUMN_GAP = 84;
 const BRACKET_STEP = 124;
 const BRACKET_HEADER_HEIGHT = 48;
@@ -332,23 +332,67 @@ function nextRoundLabel(round) {
   return index >= 0 && index < BRACKET_ROUNDS.length - 1 ? BRACKET_ROUNDS[index + 1] : "Champion";
 }
 
+function participantColorAliases(participant) {
+  const aliases = new Set();
+  const canonicalName = canonicalParticipantName(participant);
+  [participant?.id, participant?.name, canonicalName].filter(Boolean).forEach((value) => {
+    const raw = String(value).trim();
+    if (!raw) return;
+    aliases.add(raw);
+    aliases.add(raw.toLowerCase());
+    aliases.add(eventSafeId(raw));
+  });
+  return [...aliases].filter(Boolean);
+}
+
+function stableHash(value) {
+  const text = eventSafeId(value) || String(value || "unknown").toLowerCase();
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash >>> 0);
+}
+
+function deterministicFallbackColor(value) {
+  return OWNERSHIP_COLORS[stableHash(value) % OWNERSHIP_COLORS.length];
+}
+
 function stableParticipantColorMap(participants) {
   const ordered = [...participants]
     .map((p) => ({ ...p, name: canonicalParticipantName(p) }))
+    .filter((p) => p.id !== "admin")
     .sort((a, b) => String(a.name || a.id || "").localeCompare(String(b.name || b.id || "")));
-  return Object.fromEntries(ordered.map((p, index) => [p.id, OWNERSHIP_COLORS[index % OWNERSHIP_COLORS.length]]));
+  const map = {};
+  ordered.forEach((participant, index) => {
+    const color = OWNERSHIP_COLORS[index % OWNERSHIP_COLORS.length];
+    participantColorAliases(participant).forEach((alias) => {
+      map[alias] = color;
+    });
+  });
+  return map;
+}
+
+function participantColor(colorMap, participantId, displayName) {
+  const keys = [participantId, String(participantId || "").toLowerCase(), eventSafeId(participantId), displayName, String(displayName || "").toLowerCase(), eventSafeId(displayName)];
+  const found = keys.find((key) => key && colorMap[key]);
+  return found ? colorMap[found] : deterministicFallbackColor(participantId || displayName);
 }
 
 function ownershipEntriesForCountry(country, participants, lots, colorMap = stableParticipantColorMap(participants)) {
   const lot = lots.find((l) => l.country === country);
   if (!lot || !isRealAppCountry(country)) return [];
   return Object.entries(getLotShares(lot))
-    .map(([participantId, share]) => ({
-      participantId,
-      name: participantName(participants, participantId),
-      share: Number(share || 0),
-      color: colorMap[participantId] || OWNERSHIP_COLORS[eventSafeId(participantId).length % OWNERSHIP_COLORS.length]
-    }))
+    .map(([participantId, share]) => {
+      const name = participantName(participants, participantId);
+      return {
+        participantId,
+        name,
+        share: Number(share || 0),
+        color: participantColor(colorMap, participantId, name)
+      };
+    })
     .filter((entry) => entry.share > 0)
     .sort((a, b) => b.share - a.share || a.name.localeCompare(b.name));
 }
@@ -2507,7 +2551,7 @@ function App() {
       {page === "scoring" && <ScoringLog scoringEventsObj={scoringEventsObj} matchesObj={matchesObj} />}
       {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
       {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} syncMetaObj={syncMetaObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
-      <div className="footer">v3G.3 Connected bracket + ownership colors</div>
+      <div className="footer">v3G.5 Bracket card containment + ownership popover fix</div>
     </div>
   );
 }

@@ -592,7 +592,8 @@ button.secondary {
 .bracket-tree-round-header span { font-size:13px; white-space:nowrap; }
 .bracket-tree-round-header b { font-size:12px; color:#17406b; background:#edf5ff; border:1px solid #d7eaff; padding:5px 8px; border-radius:999px; white-space:nowrap; }
 .bracket-tree-node { position:absolute; z-index:2; }
-.bracket-tree-node .bracket-match-card { height:100%; box-sizing:border-box; padding:8px; border-radius:12px; box-shadow:0 5px 14px rgba(16,32,51,.07); overflow:visible; }
+.bracket-tree-node:has(.ownership-wheel-wrap:hover), .bracket-tree-node:has(.ownership-wheel-wrap:focus), .bracket-tree-node:has(.ownership-wheel-wrap:focus-within) { z-index:1000; }
+.bracket-tree-node .bracket-match-card { height:100%; box-sizing:border-box; padding:8px; border-radius:12px; box-shadow:0 5px 14px rgba(16,32,51,.07); overflow:visible; display:flex; flex-direction:column; }
 .bracket-tree-node .bracket-match-card::before { display:none; }
 .bracket-tree-node .bracket-card-topline { margin-bottom:5px; gap:6px; }
 .bracket-tree-node .bracket-round-pill { font-size:10.5px; padding:4px 7px; }
@@ -602,11 +603,12 @@ button.secondary {
 .bracket-tree-node .bracket-flag { font-size:15px; }
 .bracket-tree-node .bracket-team-name { font-size:12px; }
 .bracket-tree-node .bracket-team-score { font-size:13px; }
+.bracket-tree-node .ownership-wheel-wrap { z-index:50; }
 .bracket-tree-node .ownership-wheel { width:16px; height:16px; box-shadow:0 0 0 2px #eef4fb; }
-.bracket-tree-node .ownership-popover { z-index:20; }
-.bracket-tree-node .bracket-card-meta { margin-top:5px; font-size:10.5px; line-height:1.22; gap:1px; }
+.bracket-tree-node .ownership-popover { z-index:10000; }
+.bracket-tree-node .bracket-card-meta { margin-top:5px; font-size:10.5px; line-height:1.2; gap:1px; min-width:0; }
 .bracket-tree-node .bracket-card-meta span:nth-child(2) { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:100%; }
-.bracket-tree-node .bracket-card-footer { margin-top:5px; padding-top:5px; font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bracket-tree-node .bracket-card-footer { margin-top:auto; padding-top:5px; font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .bracket-slot-empty { opacity:.82; border-style:dashed; background:#fbfdff; }
 .bracket-tree-node-0 .bracket-match-card { border-left:4px solid #dbeafe; }
 .bracket-tree-node-1 .bracket-match-card { border-left:4px solid #e0f2fe; }
