@@ -1,4 +1,4 @@
-# World Cup 2026 Portfolio Challenge — v3G.1 Bracket Loading Hotfix
+# World Cup 2026 Portfolio Challenge — v3G.2 Bracket Loading Hotfix
 
 This update adds a new Bracket tab focused on the knockout rounds while preserving the existing ESPN sync and scoring engine.
 
@@ -48,7 +48,7 @@ Upload/update:
 Do not replace your live `src/firebase.js` file.
 
 
-## v3G.1 hotfix notes
+## v3G.2 hotfix notes
 
 This hotfix addresses two bracket-loading issues observed after v3G deployment:
 
@@ -61,3 +61,12 @@ Fixes included:
 - Knockout rounds now have date-based fallback classification.
 - FIFA country-code aliases were added for knockout-team parsing.
 - The Bracket tab also applies client-side round fallback so already-synced bad stage labels display in the right column after deploy, and a fresh ESPN refresh will overwrite the stored stage values.
+
+
+## v3G.2 Bracket date-stage hotfix
+
+- Uses America/New_York local match dates for bracket round assignment.
+- Prevents late-night group-stage matches from being treated as Round of 32 due to UTC date rollover.
+- Prevents ESPN generic “World Cup Finals” labels from pushing Round of 16/Quarterfinal/Semifinal matches into the Final column.
+- Excludes the Third Place match from the main bracket columns.
+- After deploy, run Refresh ESPN Match Data once to overwrite any previously synced bad stage values.
