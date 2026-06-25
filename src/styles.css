@@ -577,3 +577,53 @@ button.secondary {
   .ownership-popover { right:auto; left:50%; transform:translateX(-50%); top:30px; }
   .ownership-popover::before { right:auto; left:50%; transform:translateX(-50%) rotate(45deg); }
 }
+
+/* v3G.3 connected bracket tree */
+.bracket-shell { background:linear-gradient(180deg,#ffffff 0%,#f6f9ff 100%); padding:14px; overflow:hidden; }
+.bracket-round-jumps { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+.bracket-round-jumps button { border:1px solid #d8e4f3; background:#f8fbff; color:#17324f; border-radius:999px; padding:7px 11px; font-weight:900; cursor:pointer; box-shadow:0 2px 8px rgba(15,35,75,.05); }
+.bracket-round-jumps button:hover { background:#eaf3ff; border-color:#bcd7f7; }
+.bracket-scroll-hint { color:#637089; font-size:12px; font-weight:750; margin:0 0 10px; }
+.bracket-tree-scroll { overflow:auto; -webkit-overflow-scrolling:touch; padding:6px 0 16px; }
+.bracket-tree-canvas { position:relative; min-width:100%; }
+.bracket-connectors { position:absolute; inset:0; z-index:1; pointer-events:none; }
+.bracket-connectors polyline { stroke:#b9c9de; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+.bracket-tree-round-header { position:absolute; top:0; height:36px; display:flex; align-items:center; justify-content:space-between; gap:8px; border-bottom:2px solid #e2ebf6; color:#13243a; font-weight:950; z-index:3; scroll-margin-left:16px; }
+.bracket-tree-round-header span { font-size:13px; white-space:nowrap; }
+.bracket-tree-round-header b { font-size:12px; color:#17406b; background:#edf5ff; border:1px solid #d7eaff; padding:5px 8px; border-radius:999px; white-space:nowrap; }
+.bracket-tree-node { position:absolute; z-index:2; }
+.bracket-tree-node .bracket-match-card { height:100%; box-sizing:border-box; padding:8px; border-radius:12px; box-shadow:0 5px 14px rgba(16,32,51,.07); overflow:visible; }
+.bracket-tree-node .bracket-match-card::before { display:none; }
+.bracket-tree-node .bracket-card-topline { margin-bottom:5px; gap:6px; }
+.bracket-tree-node .bracket-round-pill { font-size:10.5px; padding:4px 7px; }
+.bracket-tree-node .badge { font-size:10px; padding:4px 7px; }
+.bracket-tree-node .bracket-teams { gap:4px; }
+.bracket-tree-node .bracket-team-row { grid-template-columns:20px minmax(0,1fr) 22px 20px; min-height:24px; padding:3px 5px; gap:5px; border-radius:8px; }
+.bracket-tree-node .bracket-flag { font-size:15px; }
+.bracket-tree-node .bracket-team-name { font-size:12px; }
+.bracket-tree-node .bracket-team-score { font-size:13px; }
+.bracket-tree-node .ownership-wheel { width:16px; height:16px; box-shadow:0 0 0 2px #eef4fb; }
+.bracket-tree-node .ownership-popover { z-index:20; }
+.bracket-tree-node .bracket-card-meta { margin-top:5px; font-size:10.5px; line-height:1.22; gap:1px; }
+.bracket-tree-node .bracket-card-meta span:nth-child(2) { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:100%; }
+.bracket-tree-node .bracket-card-footer { margin-top:5px; padding-top:5px; font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bracket-slot-empty { opacity:.82; border-style:dashed; background:#fbfdff; }
+.bracket-tree-node-0 .bracket-match-card { border-left:4px solid #dbeafe; }
+.bracket-tree-node-1 .bracket-match-card { border-left:4px solid #e0f2fe; }
+.bracket-tree-node-2 .bracket-match-card { border-left:4px solid #dcfce7; }
+.bracket-tree-node-3 .bracket-match-card { border-left:4px solid #fef3c7; }
+.bracket-tree-node-4 .bracket-match-card { border-left:4px solid #fee2e2; }
+
+@media (min-width: 1200px) {
+  .bracket-page { max-width:1500px; }
+  .bracket-tree-scroll { padding-bottom:20px; }
+}
+
+@media (max-width: 760px) {
+  .bracket-shell { padding:12px; }
+  .bracket-round-jumps { flex-wrap:nowrap; overflow-x:auto; padding-bottom:4px; }
+  .bracket-round-jumps button { flex:0 0 auto; }
+  .bracket-scroll-hint { font-size:11px; }
+  .bracket-tree-scroll { margin-left:-6px; margin-right:-6px; padding-left:6px; padding-right:6px; }
+  .bracket-connectors polyline { stroke-width:2; }
+}

@@ -219,7 +219,32 @@ const COUNTRY_FLAGS = {
   "New Zealand": "🇳🇿", "Iraq": "🇮🇶", "Cape Verde": "🇨🇻", "Saudi Arabia": "🇸🇦", "Haiti": "🇭🇹",
   "South Africa": "🇿🇦", "Curaçao": "🇨🇼", "Qatar": "🇶🇦"
 };
-const OWNERSHIP_COLORS = ["#0f62fe", "#22c55e", "#f59e0b", "#ef4444", "#7c3aed", "#06b6d4", "#f97316", "#14b8a6", "#64748b", "#ec4899"];
+const OWNERSHIP_COLORS = [
+  "#2563eb", "#16a34a", "#f97316", "#dc2626", "#7c3aed", "#0891b2", "#db2777", "#ca8a04",
+  "#0f766e", "#9333ea", "#ea580c", "#65a30d", "#be123c", "#0284c7", "#854d0e", "#4f46e5",
+  "#15803d", "#b91c1c", "#0d9488", "#c026d3", "#d97706", "#0369a1", "#a21caf", "#475569"
+];
+const BRACKET_CARD_WIDTH = 218;
+const BRACKET_CARD_HEIGHT = 106;
+const BRACKET_COLUMN_GAP = 84;
+const BRACKET_STEP = 124;
+const BRACKET_HEADER_HEIGHT = 48;
+const BRACKET_ROUND_EXPECTED_COUNTS = {
+  "Round of 32": 16,
+  "Round of 16": 8,
+  "Quarterfinal": 4,
+  "Semifinal": 2,
+  "Final": 1
+};
+const ESPN_BRACKET_EVENT_ORDER = {
+  "Round of 32": [
+    "53452541", "53452543", "53452545", "53452547",
+    "53452549", "53452551", "53452553", "53452555",
+    "53452557", "53452561", "53452563", "53452565",
+    "53452503", "53452569", "53452505", "53452507"
+  ],
+  "Round of 16": ["53452509", "53452511", "53452513", "53452515", "53452517", "53452519", "53452521", "53452523"]
+};
 
 function eventSafeId(value) {
   return String(value || "")
@@ -307,18 +332,25 @@ function nextRoundLabel(round) {
   return index >= 0 && index < BRACKET_ROUNDS.length - 1 ? BRACKET_ROUNDS[index + 1] : "Champion";
 }
 
-function ownershipEntriesForCountry(country, participants, lots) {
+function stableParticipantColorMap(participants) {
+  const ordered = [...participants]
+    .map((p) => ({ ...p, name: canonicalParticipantName(p) }))
+    .sort((a, b) => String(a.name || a.id || "").localeCompare(String(b.name || b.id || "")));
+  return Object.fromEntries(ordered.map((p, index) => [p.id, OWNERSHIP_COLORS[index % OWNERSHIP_COLORS.length]]));
+}
+
+function ownershipEntriesForCountry(country, participants, lots, colorMap = stableParticipantColorMap(participants)) {
   const lot = lots.find((l) => l.country === country);
   if (!lot || !isRealAppCountry(country)) return [];
   return Object.entries(getLotShares(lot))
-    .map(([participantId, share], index) => ({
+    .map(([participantId, share]) => ({
       participantId,
       name: participantName(participants, participantId),
       share: Number(share || 0),
-      color: OWNERSHIP_COLORS[index % OWNERSHIP_COLORS.length]
+      color: colorMap[participantId] || OWNERSHIP_COLORS[eventSafeId(participantId).length % OWNERSHIP_COLORS.length]
     }))
     .filter((entry) => entry.share > 0)
-    .sort((a, b) => b.share - a.share);
+    .sort((a, b) => b.share - a.share || a.name.localeCompare(b.name));
 }
 
 function ownershipWheelStyle(entries) {
@@ -342,6 +374,38 @@ function bracketScoreParts(match) {
 
 function sortKnockoutMatches(matches) {
   return [...matches].sort((a, b) => matchSortTime(a) - matchSortTime(b) || String(a.id || "").localeCompare(String(b.id || "")));
+}
+
+function espnEventId(match) {
+  return String(match?.espnEventId || match?.id || "").replace(/^espn-/, "");
+}
+
+function placeholderSeedNumber(value, pattern) {
+  const match = String(value || "").match(pattern);
+  return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
+}
+
+function inferredBracketSeedOrder(match, round) {
+  const text = `${match?.home || ""} ${match?.away || ""}`;
+  if (round === "Round of 16") return placeholderSeedNumber(text, /Round\s+of\s+32\s+(\d+)/i);
+  if (round === "Quarterfinal") return placeholderSeedNumber(text, /Round\s+of\s+16\s+(\d+)/i);
+  if (round === "Semifinal") return placeholderSeedNumber(text, /Quarterfinal\s+(\d+)/i);
+  if (round === "Final") return placeholderSeedNumber(text, /Semifinal\s+(\d+)/i);
+  return Number.POSITIVE_INFINITY;
+}
+
+function sortBracketRoundMatches(matches, round) {
+  const fixedOrder = ESPN_BRACKET_EVENT_ORDER[round] || [];
+  const orderMap = Object.fromEntries(fixedOrder.map((id, index) => [id, index]));
+  return [...matches].sort((a, b) => {
+    const fixedA = orderMap[espnEventId(a)] ?? Number.POSITIVE_INFINITY;
+    const fixedB = orderMap[espnEventId(b)] ?? Number.POSITIVE_INFINITY;
+    if (fixedA !== fixedB) return fixedA - fixedB;
+    const seedA = inferredBracketSeedOrder(a, round);
+    const seedB = inferredBracketSeedOrder(b, round);
+    if (seedA !== seedB) return seedA - seedB;
+    return matchSortTime(a) - matchSortTime(b) || String(a.id || "").localeCompare(String(b.id || ""));
+  });
 }
 
 function getMatchCountries(match) {
@@ -1363,8 +1427,8 @@ function Matches({ user, participantsObj, scheduleObj, creditAdjustmentsObj, tra
 }
 
 
-function OwnershipWheel({ country, participants, lots }) {
-  const entries = ownershipEntriesForCountry(country, participants, lots);
+function OwnershipWheel({ country, participants, lots, colorMap }) {
+  const entries = ownershipEntriesForCountry(country, participants, lots, colorMap);
   if (!isRealAppCountry(country)) return <span className="ownership-wheel placeholder-wheel" title="Ownership will appear once a real country is assigned." />;
   return (
     <span className="ownership-wheel-wrap" tabIndex={0} aria-label={`${country} ownership`}>
@@ -1383,19 +1447,19 @@ function OwnershipWheel({ country, participants, lots }) {
   );
 }
 
-function BracketTeamRow({ team, score, isWinner, participants, lots }) {
+function BracketTeamRow({ team, score, isWinner, participants, lots, colorMap }) {
   const placeholder = isBracketPlaceholderName(team);
   return (
     <div className={`bracket-team-row ${isWinner ? "winner" : ""} ${placeholder ? "placeholder" : ""}`}>
       <span className="bracket-flag">{placeholder ? "🏳️" : countryFlag(team)}</span>
       <span className="bracket-team-name">{team || "TBD"}</span>
       <span className="bracket-team-score">{score}</span>
-      <OwnershipWheel country={team} participants={participants} lots={lots} />
+      <OwnershipWheel country={team} participants={participants} lots={lots} colorMap={colorMap} />
     </div>
   );
 }
 
-function BracketMatchCard({ match, participants, lots }) {
+function BracketMatchCard({ match, participants, lots, colorMap }) {
   const [homeScore, awayScore] = bracketScoreParts(match);
   const winner = match.winnerCountry || "";
   const displayStage = effectiveKnockoutStage(match);
@@ -1413,8 +1477,8 @@ function BracketMatchCard({ match, participants, lots }) {
         <span className={`badge ${statusBadgeClass(match)}`}>{statusLabel}</span>
       </div>
       <div className="bracket-teams">
-        <BracketTeamRow team={match.home} score={homeScore} isWinner={winner === match.home} participants={participants} lots={lots} />
-        <BracketTeamRow team={match.away} score={awayScore} isWinner={winner === match.away} participants={participants} lots={lots} />
+        <BracketTeamRow team={match.home} score={homeScore} isWinner={winner === match.home} participants={participants} lots={lots} colorMap={colorMap} />
+        <BracketTeamRow team={match.away} score={awayScore} isWinner={winner === match.away} participants={participants} lots={lots} colorMap={colorMap} />
       </div>
       <div className="bracket-card-meta">
         <span>{match.displayDate || fmtDate(match.dateTime)} · {match.time || fmtTime(match.dateTime)}</span>
@@ -1427,11 +1491,99 @@ function BracketMatchCard({ match, participants, lots }) {
   );
 }
 
+function buildBracketLayout(matchesByRound) {
+  const roundWidth = BRACKET_CARD_WIDTH + BRACKET_COLUMN_GAP;
+  const rows = [];
+  const nodes = [];
+  const connectors = [];
+  const boardWidth = BRACKET_ROUNDS.length * BRACKET_CARD_WIDTH + (BRACKET_ROUNDS.length - 1) * BRACKET_COLUMN_GAP;
+  const boardHeight = BRACKET_HEADER_HEIGHT + ((BRACKET_ROUND_EXPECTED_COUNTS["Round of 32"] - 1) * BRACKET_STEP) + BRACKET_CARD_HEIGHT + 28;
+
+  BRACKET_ROUNDS.forEach((round, roundIndex) => {
+    const expected = BRACKET_ROUND_EXPECTED_COUNTS[round];
+    const roundMatches = matchesByRound[round] || [];
+    const stride = Math.pow(2, roundIndex);
+    const offset = (stride - 1) / 2;
+    const left = roundIndex * roundWidth;
+
+    rows.push({
+      round,
+      left,
+      width: BRACKET_CARD_WIDTH,
+      points: KNOCKOUT_POINTS[round],
+      expected
+    });
+
+    for (let index = 0; index < expected; index += 1) {
+      const top = BRACKET_HEADER_HEIGHT + ((offset + index * stride) * BRACKET_STEP);
+      nodes.push({
+        round,
+        roundIndex,
+        slotIndex: index,
+        left,
+        top,
+        width: BRACKET_CARD_WIDTH,
+        height: BRACKET_CARD_HEIGHT,
+        match: roundMatches[index] || null,
+        key: `${round}-${index}`
+      });
+    }
+  });
+
+  nodes.forEach((node) => {
+    if (node.roundIndex >= BRACKET_ROUNDS.length - 1) return;
+    const nextRound = BRACKET_ROUNDS[node.roundIndex + 1];
+    const nextNode = nodes.find((candidate) => candidate.round === nextRound && candidate.slotIndex === Math.floor(node.slotIndex / 2));
+    if (!nextNode) return;
+    const x1 = node.left + node.width;
+    const y1 = node.top + node.height / 2;
+    const x2 = nextNode.left;
+    const y2 = nextNode.top + nextNode.height / 2;
+    const midX = x1 + BRACKET_COLUMN_GAP / 2;
+    connectors.push({ key: `${node.key}-to-${nextNode.key}`, points: `${x1},${y1} ${midX},${y1} ${midX},${y2} ${x2},${y2}` });
+  });
+
+  return { rows, nodes, connectors, boardWidth, boardHeight };
+}
+
+function BracketRoundJump({ rows }) {
+  return (
+    <div className="bracket-round-jumps" aria-label="Bracket round shortcuts">
+      {rows.map((row) => (
+        <button key={row.round} type="button" onClick={() => document.getElementById(`bracket-round-${eventSafeId(row.round)}`)?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" })}>
+          {row.round}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function BracketSlotCard({ node, participants, lots, colorMap }) {
+  if (node.match) {
+    return <BracketMatchCard match={node.match} participants={participants} lots={lots} colorMap={colorMap} />;
+  }
+  return (
+    <div className="bracket-match-card bracket-slot-empty">
+      <div className="bracket-card-topline">
+        <span className="bracket-round-pill">{roundShortLabel(node.round)} · +{KNOCKOUT_POINTS[node.round]} pts</span>
+        <span className="badge neutral">TBD</span>
+      </div>
+      <div className="bracket-teams">
+        <BracketTeamRow team={`${node.round} ${node.slotIndex + 1}`} score="—" isWinner={false} participants={participants} lots={lots} colorMap={colorMap} />
+        <BracketTeamRow team="Opponent TBD" score="—" isWinner={false} participants={participants} lots={lots} colorMap={colorMap} />
+      </div>
+      <div className="bracket-card-footer"><span>Waiting for ESPN slot</span></div>
+    </div>
+  );
+}
+
 function Bracket({ participantsObj, scheduleObj, creditAdjustmentsObj, matchesObj, scoringEventsObj, syncMetaObj }) {
   const { participants, lots } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj), [participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj]);
+  const colorMap = useMemo(() => stableParticipantColorMap(participants), [participants]);
   const matches = useMemo(() => getActiveMatches(matchesObj), [matchesObj]);
   const knockoutMatches = useMemo(() => sortKnockoutMatches(matches.filter((m) => isKnockoutStage(m))), [matches]);
-  const matchesByRound = useMemo(() => Object.fromEntries(BRACKET_ROUNDS.map((round) => [round, knockoutMatches.filter((m) => effectiveKnockoutStage(m) === round)])), [knockoutMatches]);
+  const matchesByRound = useMemo(() => Object.fromEntries(BRACKET_ROUNDS.map((round) => [round, sortBracketRoundMatches(knockoutMatches.filter((m) => effectiveKnockoutStage(m) === round), round)])), [knockoutMatches]);
+  const bracketLayout = useMemo(() => buildBracketLayout(matchesByRound), [matchesByRound]);
   const knownTeamCount = knockoutMatches.reduce((sum, match) => sum + getMatchCountries(match).length, 0);
   const lastSyncAt = Number(syncMetaObj?.lastMatchSyncAt || syncMetaObj?.lastScheduleSyncAt || 0);
 
@@ -1442,7 +1594,7 @@ function Bracket({ participantsObj, scheduleObj, creditAdjustmentsObj, matchesOb
         <div className="space top-wrap">
           <div>
             <h2>World Cup Bracket</h2>
-            <p className="muted">Track the knockout path, live scores, match times, winner points, and portfolio ownership in one bracket view.</p>
+            <p className="muted">A connected bracket tree showing who feeds into each next matchup, with live scores, winner points, and portfolio ownership wheels.</p>
           </div>
           <div className="bracket-summary-stack">
             <span className="badge positive">{knockoutMatches.length} knockout matches loaded</span>
@@ -1454,30 +1606,45 @@ function Bracket({ participantsObj, scheduleObj, creditAdjustmentsObj, matchesOb
 
       <div className="card bracket-notes-card">
         <div className="rules-grid bracket-rules-grid">
-          <p><b>Points at stake:</b> R32 +5, R16 +9, Quarterfinal +15, Semifinal +22, Final +34.</p>
-          <p><b>Ownership wheels:</b> small pie wheels show who owns each team. Hover on desktop or tap/focus on mobile to expand ownership.</p>
-          <p><b>Data source:</b> bracket cards use the same synced ESPN match data as the Matches tab, not a separate scoring engine.</p>
+          <p><b>Progression:</b> connected lines show which two matches feed into the next match.</p>
+          <p><b>Points:</b> R32 +5, R16 +9, QF +15, SF +22, Final +34.</p>
+          <p><b>Ownership colors:</b> each participant now has one unique fixed color across all team wheels.</p>
         </div>
       </div>
 
       {knockoutMatches.length ? (
-        <div className="bracket-board card">
-          {BRACKET_ROUNDS.map((round) => {
-            const roundMatches = matchesByRound[round] || [];
-            return (
-              <div className="bracket-round-column" key={round}>
-                <div className="bracket-round-header">
-                  <h3>{round}</h3>
-                  <span className="badge neutral">+{KNOCKOUT_POINTS[round]} pts</span>
+        <div className="bracket-shell card">
+          <BracketRoundJump rows={bracketLayout.rows} />
+          <div className="bracket-scroll-hint">Swipe or scroll horizontally to follow the full bracket path.</div>
+          <div className="bracket-tree-scroll">
+            <div className="bracket-tree-canvas" style={{ width: bracketLayout.boardWidth, height: bracketLayout.boardHeight }}>
+              <svg className="bracket-connectors" width={bracketLayout.boardWidth} height={bracketLayout.boardHeight} aria-hidden="true">
+                {bracketLayout.connectors.map((connector) => (
+                  <polyline key={connector.key} points={connector.points} fill="none" />
+                ))}
+              </svg>
+              {bracketLayout.rows.map((row) => (
+                <div
+                  id={`bracket-round-${eventSafeId(row.round)}`}
+                  key={row.round}
+                  className="bracket-tree-round-header"
+                  style={{ left: row.left, width: row.width }}
+                >
+                  <span>{row.round}</span>
+                  <b>+{row.points} pts</b>
                 </div>
-                <div className="bracket-round-matches">
-                  {roundMatches.length ? roundMatches.map((match) => (
-                    <BracketMatchCard key={match.id || match.espnEventId} match={match} participants={participants} lots={lots} />
-                  )) : <div className="bracket-empty-slot">Waiting for ESPN bracket slots</div>}
+              ))}
+              {bracketLayout.nodes.map((node) => (
+                <div
+                  key={node.key}
+                  className={`bracket-tree-node bracket-tree-node-${node.roundIndex}`}
+                  style={{ left: node.left, top: node.top, width: node.width, height: node.height }}
+                >
+                  <BracketSlotCard node={node} participants={participants} lots={lots} colorMap={colorMap} />
                 </div>
-              </div>
-            );
-          })}
+              ))}
+            </div>
+          </div>
         </div>
       ) : (
         <div className="card empty-bracket-card">
@@ -1485,134 +1652,6 @@ function Bracket({ participantsObj, scheduleObj, creditAdjustmentsObj, matchesOb
           <p className="muted">Use Refresh ESPN Match Data on the Matches tab once knockout fixtures appear. The Bracket tab will populate automatically from those synced matches.</p>
         </div>
       )}
-    </div>
-  );
-}
-
-function Portfolio({ user, participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj }) {
-  const { participants, lots } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj), [participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj]);
-  const defaultId = participants.find((p) => p.id === user.id)?.id || participants[0]?.id || "";
-  const [selectedId, setSelectedId] = useState(defaultId);
-
-  useEffect(() => {
-    if (!selectedId && defaultId) setSelectedId(defaultId);
-  }, [defaultId, selectedId]);
-
-  const selected = participants.find((p) => p.id === selectedId) || participants.find((p) => p.id === user.id) || { holdings: [], spent: 0, points: 0, profit: 0, remaining: STARTING_CREDITS, name: user.name };
-  const soldCountries = lots.filter((l) => l.status === "sold");
-
-  return (
-    <div className="container grid">
-      <div className="card page-title">
-        <div className="space top-wrap">
-          <div>
-            <p className="eyebrow">Portfolio view</p>
-            <h2>{selected.name}'s Portfolio</h2>
-            <p className="muted">View each participant's country holdings, ownership share, auction cost, trade credit impact, points, and profit.</p>
-          </div>
-          <div className="selector-box">
-            <label>Viewing</label>
-            <select value={selected.id || ""} onChange={(e) => setSelectedId(e.target.value)}>
-              {participants.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid four">
-        <StatCard label="Points" value={money(selected.points)} />
-        <StatCard label="Net credits spent" value={money(selected.spent)} sub={`Auction ${money(selected.auctionSpent)} · Trades ${selected.tradeCreditNet >= 0 ? "+" : ""}${money(selected.tradeCreditNet)}`} />
-        <StatCard label="Remaining" value={money(selected.remaining)} />
-        <StatCard label="Profit" value={money(selected.profit)} tone={selected.profit >= 0 ? "positive" : "negative"} />
-      </div>
-
-      <div className="card">
-        <div className="space top-wrap"><h3>Holdings</h3><span className="badge neutral">{selected.holdings?.length || 0} countries</span></div>
-        {selected.holdings?.length ? (
-          <div className="portfolio-card-grid">
-            {selected.holdings.map((l) => {
-              const countryProfit = Number(l.ownerPoints || 0) - Number(l.ownerCost || 0);
-              return (
-                <div className="portfolio-card" key={l.id}>
-                  <div className="space top-wrap">
-                    <div><b>{l.country}</b><small>ESPN rank #{l.rank}</small></div>
-                    <span className="badge neutral">{money(l.share)}%</span>
-                  </div>
-                  <div className="mini-grid">
-                    <span>Points</span><b>{money(l.ownerPoints)}</b>
-                    <span>Auction cost basis</span><b>{money(l.ownerCost)}</b>
-                    <span>Country P/L</span><b className={countryProfit >= 0 ? "profit-positive" : "profit-negative"}>{money(countryProfit)}</b>
-                    <span>Status</span><b>Active</b>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : <p className="muted">No countries yet.</p>}
-      </div>
-
-      <div className="card">
-        <h3>Country ownership snapshot</h3>
-        <p className="muted">Ownership updates when admin-approved trades are executed. Each country must always total 100% ownership.</p>
-        {soldCountries.length ? (
-          <div className="ownership-grid">
-            {soldCountries.map((lot) => {
-              const shares = getLotShares(lot);
-              return (
-                <div className="mini-card" key={lot.id}>
-                  <b>{lot.country}</b>
-                  <small>ESPN rank #{lot.rank}</small>
-                  {Object.entries(shares).map(([participantId, share]) => {
-                    const owner = participants.find((p) => p.id === participantId);
-                    return <div className="ownership-line" key={participantId}><span>{owner?.name || participantId}</span><b>{money(share)}%</b></div>;
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        ) : <p className="muted">No countries sold yet.</p>}
-      </div>
-    </div>
-  );
-}
-
-function CountryOwnership({ participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj }) {
-  const { participants, lots } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj), [participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj]);
-  const soldLots = lots.filter((l) => l.status === "sold").sort((a, b) => Number(a.rank || a.order || 0) - Number(b.rank || b.order || 0));
-
-  return (
-    <div className="container grid">
-      <div className="card page-title">
-        <p className="eyebrow">Country ownership</p>
-        <h2>Ownership Snapshot</h2>
-        <p className="muted">Every sold country should total 100% ownership. This page is the fastest way to confirm auction corrections and completed trades.</p>
-      </div>
-      <div className="card table-card">
-        {soldLots.length ? (
-          <>
-            <table className="desktop-table">
-              <thead><tr><th>ESPN Rank</th><th>Country</th><th>Owners</th><th>Auction Winner</th><th>Auction Price</th><th>Points</th></tr></thead>
-              <tbody>{soldLots.map((lot) => {
-                const shares = getLotShares(lot);
-                const total = Object.values(shares).reduce((sum, share) => sum + Number(share || 0), 0);
-                return <tr key={lot.id}><td>{lot.rank}</td><td><b>{lot.country}</b></td><td>{Object.entries(shares).map(([id, share]) => `${participantName(participants, id)} ${money(share)}%`).join(", ") || "—"} {Math.round(total) !== 100 && <span className="badge dangerish">Totals {money(total)}%</span>}</td><td>{lot.winningBidder || "—"}</td><td>{money(lot.finalPrice)}</td><td>{money(lot.totalPoints || lot.points)}</td></tr>;
-              })}</tbody>
-            </table>
-            <div className="mobile-cards">
-              {soldLots.map((lot) => {
-                const shares = getLotShares(lot);
-                const total = Object.values(shares).reduce((sum, share) => sum + Number(share || 0), 0);
-                return <div className="mini-card" key={lot.id}>
-                  <div className="space"><b>{lot.country}</b><span className="badge neutral">Rank #{lot.rank}</span></div>
-                  <div className="ownership-lines">{Object.entries(shares).map(([id, share]) => <div className="ownership-line" key={id}><span>{participantName(participants, id)}</span><b>{money(share)}%</b></div>)}</div>
-                  <div className="mini-grid"><span>Auction Winner</span><b>{lot.winningBidder || "—"}</b><span>Price</span><b>{money(lot.finalPrice)}</b><span>Points</span><b>{money(lot.totalPoints || lot.points)}</b></div>
-                  {Math.round(total) !== 100 && <p className="notice">Ownership totals {money(total)}%.</p>}
-                </div>;
-              })}
-            </div>
-          </>
-        ) : <p className="muted">No countries sold yet.</p>}
-      </div>
     </div>
   );
 }
@@ -2468,7 +2507,7 @@ function App() {
       {page === "scoring" && <ScoringLog scoringEventsObj={scoringEventsObj} matchesObj={matchesObj} />}
       {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
       {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} syncMetaObj={syncMetaObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
-      <div className="footer">v3G.2 Bracket date-stage loading hotfix</div>
+      <div className="footer">v3G.3 Connected bracket + ownership colors</div>
     </div>
   );
 }
