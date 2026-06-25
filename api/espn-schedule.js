@@ -99,6 +99,37 @@ const FIFA_CODE_ALIASES = {
 };
 
 
+const BRACKET_SLOT_OVERRIDES = {
+  // ESPN's scoreboard API can send bracket seed codes or duplicate competitor objects for
+  // knockout placeholders. These are fallback labels only; if ESPN later sends two clean,
+  // distinct real countries, the app keeps ESPN's real countries.
+  "53452545": ["South Africa", "Canada"],
+  "53452557": ["Brazil", "Group F 2nd Place"],
+  "53452541": ["Germany", "Third Place Group A/B/C/D/F"],
+  "53452547": ["Group F Winner", "Morocco"],
+  "53452561": ["Group E 2nd Place", "Group I 2nd Place"],
+  "53452543": ["Group I Winner", "Third Place Group C/D/F/G/H"],
+  "53452563": ["Mexico", "Third Place Group C/E/F/H/I"],
+  "53452565": ["Group L Winner", "Third Place Group E/H/I/J/K"],
+  "53452555": ["Group G Winner", "Third Place Group A/E/H/I/J"],
+  "53452553": ["United States", "Third Place Group B/E/F/I/J"],
+  "53452551": ["Group H Winner", "Group J 2nd Place"],
+  "53452549": ["Group K 2nd Place", "Group L 2nd Place"],
+  "53452505": ["Switzerland", "Third Place Group E/F/G/I/J"],
+  "53452503": ["Group D 2nd Place", "Group G 2nd Place"],
+  "53452569": ["Argentina", "Group H 2nd Place"],
+  "53452507": ["Group K Winner", "Third Place Group D/E/I/J/L"],
+  "53452509": ["Round of 32 2 Winner", "Round of 32 5 Winner"],
+  "53452511": ["Round of 32 1 Winner", "Round of 32 3 Winner"],
+  "53452513": ["Round of 32 6 Winner", "Round of 32 8 Winner"],
+  "53452515": ["Round of 32 7 Winner", "Round of 32 4 Winner"],
+  "53452517": ["Round of 32 9 Winner", "Round of 32 10 Winner"],
+  "53452519": ["Round of 32 11 Winner", "Round of 32 12 Winner"],
+  "53452521": ["Round of 32 13 Winner", "Round of 32 14 Winner"],
+  "53452523": ["Round of 32 15 Winner", "Round of 32 16 Winner"]
+};
+
+
 function normalizeForCompare(name) {
   return String(name || "")
     .normalize("NFD")
@@ -115,15 +146,48 @@ const ALIAS_BY_NORMALIZED_NAME = Object.fromEntries(
 
 const KNOWN_COUNTRIES_BY_NORMALIZED_NAME = new Set(APP_COUNTRIES.map(normalizeForCompare));
 
+function normalizeBracketPlaceholder(name) {
+  const value = String(name || "").replace(/\s+/g, " ").trim();
+  if (!value || /^TBD$/i.test(value)) return "TBD";
+
+  let match = value.match(/^([12])\s*([A-L])$/i);
+  if (match) return `Group ${match[2].toUpperCase()} ${match[1] === "1" ? "Winner" : "2nd Place"}`;
+
+  match = value.match(/^3(?:RD)?\s+([A-L](?:\/[A-L])*)$/i);
+  if (match) return `Third Place Group ${match[1].toUpperCase()}`;
+
+  match = value.match(/^3(?:RD)?\s+(?:Place\s+)?Group\s+([A-L](?:\/[A-L])*)$/i);
+  if (match) return `Third Place Group ${match[1].toUpperCase()}`;
+
+  match = value.match(/^RD\s*32\s*W\s*(\d+)$/i);
+  if (match) return `Round of 32 ${Number(match[1])} Winner`;
+
+  match = value.match(/^RD\s*16\s*W\s*(\d+)$/i);
+  if (match) return `Round of 16 ${Number(match[1])} Winner`;
+
+  match = value.match(/^QF\s*W\s*(\d+)$/i);
+  if (match) return `Quarterfinal ${Number(match[1])} Winner`;
+
+  match = value.match(/^SF\s*W\s*(\d+)$/i);
+  if (match) return `Semifinal ${Number(match[1])} Winner`;
+
+  match = value.match(/^SF\s*L\s*(\d+)$/i);
+  if (match) return `Semifinal ${Number(match[1])} Loser`;
+
+  return "";
+}
+
 function normalizeTeamName(name) {
   if (!name) return "TBD";
   const cleaned = String(name).replace(/\s+/g, " ").trim();
+  const bracketPlaceholder = normalizeBracketPlaceholder(cleaned);
+  if (bracketPlaceholder) return bracketPlaceholder;
   return ALIAS_BY_NORMALIZED_NAME[normalizeForCompare(cleaned)] || cleaned;
 }
 
 function isBracketPlaceholder(name) {
   const value = String(name || "").replace(/\s+/g, " ").trim();
-  if (!value || value === "TBD") return true;
+  if (!value || /^TBD$/i.test(value) || normalizeBracketPlaceholder(value)) return true;
   return (
     /^Group [A-L] (Winner|2nd Place)$/i.test(value) ||
     /^Third Place Group /i.test(value) ||
@@ -270,6 +334,21 @@ function getWinnerCountry(home, away, homeName, awayName) {
   return "";
 }
 
+function shouldKeepExistingSlotName(existing, other) {
+  return isKnownAppCountry(existing) && existing !== other;
+}
+
+function applyBracketSlotFallbacks(eventId, homeName, awayName) {
+  const fallback = BRACKET_SLOT_OVERRIDES[String(eventId || "")];
+  if (!fallback) return [homeName, awayName];
+
+  const [fallbackHome, fallbackAway] = fallback.map(normalizeTeamName);
+  const duplicateTeams = homeName && awayName && homeName === awayName;
+  const nextHome = !duplicateTeams && shouldKeepExistingSlotName(homeName, awayName) ? homeName : fallbackHome;
+  const nextAway = !duplicateTeams && shouldKeepExistingSlotName(awayName, homeName) ? awayName : fallbackAway;
+  return [nextHome || homeName, nextAway || awayName];
+}
+
 function normalizeEvent(event) {
   const competition = event.competitions?.[0] || {};
   const competitors = competition.competitors || [];
@@ -282,6 +361,7 @@ function normalizeEvent(event) {
     if (!isKnownAppCountry(homeName) && isKnownAppCountry(parsedMatchupNames[0])) homeName = parsedMatchupNames[0];
     if (!isKnownAppCountry(awayName) && isKnownAppCountry(parsedMatchupNames[1])) awayName = parsedMatchupNames[1];
   }
+  [homeName, awayName] = applyBracketSlotFallbacks(event.id, homeName, awayName);
   const dateTime = event.date || competition.date || "";
   const dateParts = dateTime ? formatDateParts(dateTime) : { date: "", displayDate: "Unscheduled", time: "—" };
   const statusParts = parseStatus(event, competition);
