@@ -629,3 +629,26 @@ button.secondary {
   .bracket-tree-scroll { margin-left:-6px; margin-right:-6px; padding-left:6px; padding-right:6px; }
   .bracket-connectors polyline { stroke-width:2; }
 }
+
+
+/* v3G.6 bracket containment + popover layering hotfix */
+.bracket-tree-node { z-index:20; }
+.bracket-tree-node:hover,
+.bracket-tree-node:focus-within { z-index:50000 !important; }
+.bracket-tree-node:hover .bracket-match-card,
+.bracket-tree-node:focus-within .bracket-match-card { position:relative; z-index:50000; }
+.bracket-tree-node .bracket-match-card { min-height:188px; overflow:visible; }
+.bracket-tree-node .bracket-card-meta span { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:100%; }
+.bracket-tree-node .bracket-card-footer { min-height:18px; }
+.bracket-tree-node .ownership-wheel-wrap { position:relative; z-index:100; }
+.bracket-tree-node .ownership-wheel-wrap:hover,
+.bracket-tree-node .ownership-wheel-wrap:focus,
+.bracket-tree-node .ownership-wheel-wrap:focus-within { z-index:50005 !important; }
+.bracket-tree-node .ownership-popover { z-index:50010 !important; }
+.bracket-tree-node .ownership-wheel-wrap:hover .ownership-popover,
+.bracket-tree-node .ownership-wheel-wrap:focus .ownership-popover,
+.bracket-tree-node .ownership-wheel-wrap:focus-within .ownership-popover { display:grid; gap:8px; }
+@media (max-width: 760px) {
+  .bracket-tree-node .bracket-match-card { min-height:188px; }
+  .bracket-tree-node .ownership-popover { min-width:220px; max-width:260px; }
+}
