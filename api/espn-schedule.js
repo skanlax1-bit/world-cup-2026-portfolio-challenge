@@ -84,6 +84,21 @@ const TEAM_ALIASES = {
   "South Africa": "South Africa"
 };
 
+const FIFA_CODE_ALIASES = {
+  "FRA": "France", "ESP": "Spain", "ENG": "England", "POR": "Portugal", "GER": "Germany",
+  "BRA": "Brazil", "ARG": "Argentina", "NED": "Netherlands", "NOR": "Norway", "TUR": "Türkiye",
+  "SEN": "Senegal", "BEL": "Belgium", "URU": "Uruguay", "MAR": "Morocco", "ECU": "Ecuador",
+  "CRO": "Croatia", "CIV": "Ivory Coast", "COL": "Colombia", "SUI": "Switzerland", "SWE": "Sweden",
+  "JPN": "Japan", "USA": "United States", "AUT": "Austria", "MEX": "Mexico", "CAN": "Canada",
+  "DZA": "Algeria", "ALG": "Algeria", "PAR": "Paraguay", "SCO": "Scotland", "CZE": "Czechia",
+  "KOR": "South Korea", "EGY": "Egypt", "AUS": "Australia", "COD": "Congo DR", "DRC": "Congo DR",
+  "UZB": "Uzbekistan", "IRI": "Iran", "IRN": "Iran", "GHA": "Ghana", "BIH": "Bosnia and Herzegovina",
+  "PAN": "Panama", "TUN": "Tunisia", "JOR": "Jordan", "NZL": "New Zealand", "IRQ": "Iraq",
+  "CPV": "Cape Verde", "KSA": "Saudi Arabia", "HTI": "Haiti", "RSA": "South Africa", "CUW": "Curaçao",
+  "QAT": "Qatar"
+};
+
+
 function normalizeForCompare(name) {
   return String(name || "")
     .normalize("NFD")
@@ -95,7 +110,7 @@ function normalizeForCompare(name) {
 }
 
 const ALIAS_BY_NORMALIZED_NAME = Object.fromEntries(
-  Object.entries(TEAM_ALIASES).map(([from, to]) => [normalizeForCompare(from), to])
+  Object.entries({ ...TEAM_ALIASES, ...FIFA_CODE_ALIASES }).map(([from, to]) => [normalizeForCompare(from), to])
 );
 
 const KNOWN_COUNTRIES_BY_NORMALIZED_NAME = new Set(APP_COUNTRIES.map(normalizeForCompare));
@@ -128,13 +143,32 @@ function isKnownAppCountry(name) {
 }
 
 function inferStage(event) {
-  const text = `${event.name || ""} ${event.shortName || ""} ${event.season?.slug || ""} ${event.competitions?.[0]?.notes?.[0]?.headline || ""}`.toLowerCase();
-  if (text.includes("third-place") || text.includes("third place")) return "Third Place";
-  if (text.includes("final")) return "Final";
-  if (text.includes("semifinal") || text.includes("semi-final")) return "Semifinal";
-  if (text.includes("quarterfinal") || text.includes("quarter-final")) return "Quarterfinal";
-  if (text.includes("round of 16")) return "Round of 16";
-  if (text.includes("round of 32")) return "Round of 32";
+  const competition = event.competitions?.[0] || {};
+  const noteText = [
+    competition.notes?.[0]?.headline,
+    competition.notes?.[0]?.type,
+    competition.type?.text,
+    competition.type?.abbreviation,
+    event.name,
+    event.shortName
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  // Important: do not include season.slug here. ESPN often labels the whole tournament
+  // as "World Cup Finals", which made every knockout game look like the Final.
+  if (/third[-\s]?place/.test(noteText)) return "Third Place";
+  if (/semi[-\s]?final/.test(noteText)) return "Semifinal";
+  if (/quarter[-\s]?final/.test(noteText)) return "Quarterfinal";
+  if (/round\s+of\s+16|\br16\b/.test(noteText)) return "Round of 16";
+  if (/round\s+of\s+32|\br32\b/.test(noteText)) return "Round of 32";
+  if (/(^|[^a-z])final([^a-z]|$)/.test(noteText)) return "Final";
+
+  const isoDate = String(event.date || competition.date || "").slice(0, 10);
+  if (isoDate >= "2026-06-28" && isoDate <= "2026-07-03") return "Round of 32";
+  if (isoDate >= "2026-07-04" && isoDate <= "2026-07-07") return "Round of 16";
+  if (isoDate >= "2026-07-09" && isoDate <= "2026-07-11") return "Quarterfinal";
+  if (isoDate >= "2026-07-14" && isoDate <= "2026-07-15") return "Semifinal";
+  if (isoDate === "2026-07-18") return "Third Place";
+  if (isoDate === "2026-07-19") return "Final";
   return "Group Stage";
 }
 
@@ -175,6 +209,44 @@ function parseStatus(event, competition) {
   return { statusType: "not_started", statusDisplay: "Not Started", matchMinute: null, completed: false };
 }
 
+function bestTeamName(competitor) {
+  const team = competitor?.team || {};
+  const candidates = [team.displayName, team.name, team.shortDisplayName, team.abbreviation, competitor?.abbreviation]
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    const normalized = normalizeTeamName(candidate);
+    if (isKnownAppCountry(normalized)) return normalized;
+  }
+  for (const candidate of candidates) {
+    const normalized = normalizeTeamName(candidate);
+    if (!isBracketPlaceholder(normalized)) return normalized;
+  }
+  return normalizeTeamName(candidates[0]) || "TBD";
+}
+
+function cleanMatchupSide(side) {
+  const cleaned = String(side || "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/^[#\d\s.-]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalizeTeamName(cleaned);
+}
+
+function parseMatchupNames(event) {
+  const candidates = [event.name, event.shortName, event.competitions?.[0]?.notes?.[0]?.headline].filter(Boolean);
+  for (const text of candidates) {
+    const normalizedText = String(text).replace(/\s+/g, " ").trim();
+    const parts = normalizedText.split(/\s+(?:vs\.?|v|@|at)\s+/i);
+    if (parts.length !== 2) continue;
+    const first = cleanMatchupSide(parts[0]);
+    const second = cleanMatchupSide(parts[1]);
+    if (first && second && first !== "TBD" && second !== "TBD") return [first, second];
+  }
+  return [];
+}
+
 function getWinnerCountry(home, away, homeName, awayName) {
   if (home?.winner === true) return homeName;
   if (away?.winner === true) return awayName;
@@ -186,8 +258,13 @@ function normalizeEvent(event) {
   const competitors = competition.competitors || [];
   const home = competitors.find((c) => c.homeAway === "home") || competitors[0] || {};
   const away = competitors.find((c) => c.homeAway === "away") || competitors[1] || {};
-  const homeName = normalizeTeamName(home.team?.displayName || home.team?.name || home.team?.shortDisplayName);
-  const awayName = normalizeTeamName(away.team?.displayName || away.team?.name || away.team?.shortDisplayName);
+  let homeName = bestTeamName(home);
+  let awayName = bestTeamName(away);
+  const parsedMatchupNames = parseMatchupNames(event);
+  if (parsedMatchupNames.length === 2) {
+    if (!isKnownAppCountry(homeName) && isKnownAppCountry(parsedMatchupNames[0])) homeName = parsedMatchupNames[0];
+    if (!isKnownAppCountry(awayName) && isKnownAppCountry(parsedMatchupNames[1])) awayName = parsedMatchupNames[1];
+  }
   const dateTime = event.date || competition.date || "";
   const dateParts = dateTime ? formatDateParts(dateTime) : { date: "", displayDate: "Unscheduled", time: "—" };
   const statusParts = parseStatus(event, competition);
