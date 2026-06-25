@@ -1,23 +1,23 @@
-# World Cup 2026 Portfolio Challenge — v3G.6 Bracket Layout Hotfix
+# World Cup 2026 Portfolio Challenge — v3G.7 Bracket Placeholder/Team Mapping Hotfix
 
-Focused hotfix after v3G.5.
+Focused hotfix after v3G.6.
 
-## Changes
+## Fixes
 
-- Enlarged connected bracket card spacing so match time, venue, and progression text stay inside each scorecard.
-- Increased bracket row spacing to prevent scorecards from visually overlapping after card height changes.
-- Added stronger hover/focus z-index rules so ownership popovers come to the front over neighboring bracket games.
-- Kept v3G.4/v3G.5 unique participant color behavior.
-- No scoring changes.
-- No ESPN parser/date/stage changes.
-- Do not replace src/firebase.js.
+- Prevents ESPN knockout placeholder seed codes from appearing as team-mapping warnings.
+- Adds explicit fallback labels for known ESPN knockout bracket match slots.
+- Fixes cases where ESPN sends duplicate teams into a bracket slot, such as Brazil/Brazil, Germany/Germany, Morocco/Morocco, or Ivory Coast/Ivory Coast.
+- Keeps the v3G.6 connected bracket layout, card spacing, ownership popovers, and unique participant colors.
+- Does not change scoring logic, trade logic, or profit logic.
 
-## Files to upload
+## Upload these files
 
-- README.md
-- src/main.jsx
-- src/styles.css
-- src/matches.js
-- api/espn-schedule.js
+- `README.md`
+- `src/main.jsx`
+- `src/styles.css`
+- `src/matches.js`
+- `api/espn-schedule.js`
 
-Do not upload or replace src/firebase.js.
+Do not replace `src/firebase.js`.
+
+After deploying, run **Refresh ESPN Match Data** once from the Matches tab so Firebase overwrites any duplicate/bad bracket records stored from the prior version.
