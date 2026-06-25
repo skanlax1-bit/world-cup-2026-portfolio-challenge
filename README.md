@@ -1,27 +1,23 @@
-# World Cup 2026 Portfolio Challenge — v3G.5 Bracket Card + Popover Hotfix
+# World Cup 2026 Portfolio Challenge — v3G.6 Bracket Layout Hotfix
 
-This package keeps the connected bracket from v3G.3 and fixes the ownership wheel color issue.
+Focused hotfix after v3G.5.
 
-## v3G.5 updates
+## Changes
 
-- Ownership wheels now use a stronger deterministic participant color system.
-- Each participant gets one stable color across bracket wheels and popovers.
-- Color lookup now supports participant id, stored name, canonical display name, lowercase aliases, and slug-safe aliases.
-- Unknown/fallback participant keys now use a deterministic hash instead of the previous length-based fallback that could repeat colors.
-- Preserves the v3G.2 bracket date/stage fixes and v3G.3 connected bracket layout.
+- Enlarged connected bracket card spacing so match time, venue, and progression text stay inside each scorecard.
+- Increased bracket row spacing to prevent scorecards from visually overlapping after card height changes.
+- Added stronger hover/focus z-index rules so ownership popovers come to the front over neighboring bracket games.
+- Kept v3G.4/v3G.5 unique participant color behavior.
+- No scoring changes.
+- No ESPN parser/date/stage changes.
+- Do not replace src/firebase.js.
 
-## Upload these files
+## Files to upload
 
-- `README.md`
-- `src/main.jsx`
-- `src/styles.css`
-- `src/matches.js`
-- `api/espn-schedule.js`
+- README.md
+- src/main.jsx
+- src/styles.css
+- src/matches.js
+- api/espn-schedule.js
 
-Do not replace `src/firebase.js`.
-
-
-## v3G.5 fixes
-- Increased connected bracket card height so time/venue/progression details stay inside each scorecard.
-- Elevated active ownership wheel popovers above neighboring bracket matches.
-- Preserved v3G.4 participant color mapping and v3G.3 connected bracket layout.
+Do not upload or replace src/firebase.js.
