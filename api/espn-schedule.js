@@ -142,40 +142,57 @@ function isKnownAppCountry(name) {
   return KNOWN_COUNTRIES_BY_NORMALIZED_NAME.has(normalizeForCompare(name));
 }
 
+function easternDateKey(value) {
+  if (!value) return "";
+  const raw = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw.slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(d).reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 function inferStage(event) {
   const competition = event.competitions?.[0] || {};
+  const dateKey = easternDateKey(event.date || competition.date || "");
+
+  // Date is the primary source for the 2026 knockout stage. Using local Eastern dates prevents
+  // late-night group games like Argentina/Jordan from being misread as Round of 32 because
+  // their UTC timestamp falls on the next calendar day.
+  if (dateKey >= "2026-06-28" && dateKey <= "2026-07-03") return "Round of 32";
+  if (dateKey >= "2026-07-04" && dateKey <= "2026-07-07") return "Round of 16";
+  if (dateKey >= "2026-07-09" && dateKey <= "2026-07-11") return "Quarterfinal";
+  if (dateKey >= "2026-07-14" && dateKey <= "2026-07-15") return "Semifinal";
+  if (dateKey === "2026-07-18") return "Third Place";
+  if (dateKey === "2026-07-19") return "Final";
+
   const noteText = [
     competition.notes?.[0]?.headline,
     competition.notes?.[0]?.type,
-    competition.type?.text,
-    competition.type?.abbreviation,
-    event.name,
-    event.shortName
+    event.shortName,
+    event.name
   ].filter(Boolean).join(" ").toLowerCase();
 
-  // Important: do not include season.slug here. ESPN often labels the whole tournament
-  // as "World Cup Finals", which made every knockout game look like the Final.
+  // Fallback only when date is unavailable. Do not use ESPN's generic tournament
+  // labels such as "World Cup Finals" because that makes every game look like the Final.
   if (/third[-\s]?place/.test(noteText)) return "Third Place";
   if (/semi[-\s]?final/.test(noteText)) return "Semifinal";
   if (/quarter[-\s]?final/.test(noteText)) return "Quarterfinal";
   if (/round\s+of\s+16|\br16\b/.test(noteText)) return "Round of 16";
   if (/round\s+of\s+32|\br32\b/.test(noteText)) return "Round of 32";
-  if (/(^|[^a-z])final([^a-z]|$)/.test(noteText)) return "Final";
-
-  const isoDate = String(event.date || competition.date || "").slice(0, 10);
-  if (isoDate >= "2026-06-28" && isoDate <= "2026-07-03") return "Round of 32";
-  if (isoDate >= "2026-07-04" && isoDate <= "2026-07-07") return "Round of 16";
-  if (isoDate >= "2026-07-09" && isoDate <= "2026-07-11") return "Quarterfinal";
-  if (isoDate >= "2026-07-14" && isoDate <= "2026-07-15") return "Semifinal";
-  if (isoDate === "2026-07-18") return "Third Place";
-  if (isoDate === "2026-07-19") return "Final";
+  if (/^final$/.test(noteText.trim())) return "Final";
   return "Group Stage";
 }
 
 function formatDateParts(dateTime) {
   const d = new Date(dateTime);
   return {
-    date: d.toISOString().slice(0, 10),
+    date: easternDateKey(dateTime),
     displayDate: d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" }),
     time: d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })
   };
