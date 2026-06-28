@@ -1,23 +1,24 @@
-# World Cup 2026 Portfolio Challenge — v3G.7 Bracket Placeholder/Team Mapping Hotfix
+# World Cup 2026 Portfolio Challenge - v3G.9 Portfolio/Ownership Crash Hotfix
 
-Focused hotfix after v3G.6.
+Focused hotfix after v3G.8.
 
 ## Fixes
 
-- Prevents ESPN knockout placeholder seed codes from appearing as team-mapping warnings.
-- Adds explicit fallback labels for known ESPN knockout bracket match slots.
-- Fixes cases where ESPN sends duplicate teams into a bracket slot, such as Brazil/Brazil, Germany/Germany, Morocco/Morocco, or Ivory Coast/Ivory Coast.
-- Keeps the v3G.6 connected bracket layout, card spacing, ownership popovers, and unique participant colors.
-- Does not change scoring logic, trade logic, or profit logic.
+- Restores the missing `Portfolio` component.
+- Restores the missing `CountryOwnership` component.
+- Fixes the blank-screen crash when opening the Portfolio tab.
+- Fixes the blank-screen crash when opening the Ownership tab.
+- Adds defensive rendering so malformed scoring/ownership rows do not blank the page.
+- Adds an ownership audit warning when a country no longer totals 100% ownership.
+- Keeps the connected bracket and ownership color work from v3G.8.
+- Does not change scoring logic, trade logic, profit logic, ESPN sync, or bracket stage mapping.
 
 ## Upload these files
 
-- `README.md`
 - `src/main.jsx`
 - `src/styles.css`
-- `src/matches.js`
-- `api/espn-schedule.js`
+- `README.md`
 
 Do not replace `src/firebase.js`.
 
-After deploying, run **Refresh ESPN Match Data** once from the Matches tab so Firebase overwrites any duplicate/bad bracket records stored from the prior version.
+You do not need to run Repair Missing Allocations for this fix. This is a front-end component restoration hotfix.
