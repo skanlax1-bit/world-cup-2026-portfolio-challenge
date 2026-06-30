@@ -1,14 +1,16 @@
-# World Cup 2026 Portfolio Challenge — v3G.10 True Bracket Path Hotfix
+# World Cup 2026 Portfolio Challenge — v3G.11 Bracket Recovery + Safe Path Ordering
 
-Focused bracket-display hotfix after v3G.9.
+Focused recovery patch after v3G.10 made the Bracket tab show empty TBD slots.
 
 ## Fixes
 
-- Stops the Bracket tab from ordering Round-of-32 games strictly by kickoff time.
-- Uses the fixed ESPN knockout tree order so connector lines show the correct future matchups.
-- Locks Round-of-32 slots to the Round-of-16 games they actually feed.
-- If a later-round ESPN/Firebase record still contains placeholders or duplicate teams, the bracket card now derives its two displayed sides from the two feeder matches instead of showing misleading duplicates.
-- Keeps the connected bracket layout, ownership wheels, participant colors, portfolio/ownership crash repair, and scoring logic unchanged.
+- Restores the Bracket tab from the last working source that included Portfolio and Ownership components.
+- Keeps the Portfolio/Ownership crash hotfix.
+- Prevents the bracket from going blank when ESPN/Firebase match ids do not match the strict bracket-slot map.
+- Uses safe fallback matching by actual teams and placeholders so real knockout matches remain visible.
+- Nudges Round-of-32 games toward ESPN-style connected bracket order instead of pure kickoff-time order when possible.
+- Keeps ownership wheels and unique colors.
+- Does not change scoring, trades, profit, Firebase config, ESPN API code, or match refresh logic.
 
 ## Upload these files
 
@@ -16,8 +18,10 @@ Focused bracket-display hotfix after v3G.9.
 - `src/main.jsx`
 - `src/styles.css`
 
-Do not replace `src/firebase.js`.
-Do not replace `src/matches.js` unless you intentionally want to reset static fallback matches.
-Do not replace `api/espn-schedule.js` for this hotfix.
+Do not replace:
 
-After deploying, refresh the Bracket tab. You do not need to clear Firebase data.
+- `src/firebase.js`
+- `src/matches.js`
+- `api/espn-schedule.js`
+
+After deploying, check the Bracket tab first. You can then run **Refresh ESPN Match Data** once from the Matches tab.
