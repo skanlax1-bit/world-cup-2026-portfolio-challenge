@@ -239,7 +239,7 @@ const BRACKET_ROUND_EXPECTED_COUNTS = {
 const ESPN_BRACKET_EVENT_ORDER = {
   "Round of 32": [
     "53452541", "53452543", "53452545", "53452547",
-    "53452549", "53452551", "53452553", "53452555",
+    "53452551", "53452549", "53452555", "53452553",
     "53452557", "53452561", "53452563", "53452565",
     "53452503", "53452569", "53452505", "53452507"
   ],
@@ -561,46 +561,149 @@ function takeBestBracketSlotMatch(remaining, round, slotIndex, eventId) {
   return remaining.shift() || null;
 }
 
+function matchCountrySet(match) {
+  return new Set(getMatchCountries(match));
+}
+
+function feederPossibleCountries(match) {
+  if (!match) return [];
+  const winner = match.winnerCountry;
+  if ((match.statusType === "final" || match.completed) && isRealAppCountry(winner)) return [winner];
+  return getMatchCountries(match);
+}
+
+function feederSlotCountries(slots, slotIndex) {
+  return feederPossibleCountries(slots?.[slotIndex]);
+}
+
+function scoreMatchForDerivedSlot(match, round, slotIndex, previousSlots) {
+  const countries = getMatchCountries(match);
+  const countrySet = new Set(countries);
+  const firstFeederIndex = slotIndex * 2;
+  const expected = [
+    ...feederSlotCountries(previousSlots, firstFeederIndex),
+    ...feederSlotCountries(previousSlots, firstFeederIndex + 1)
+  ];
+  const expectedSet = new Set(expected);
+  let score = 0;
+
+  // Team matching is the safest signal once R32 results start updating. This prevents
+  // Canada/Morocco or Brazil-style records from being dropped into the wrong R16 slot
+  // just because their kickoff time comes earlier.
+  countries.forEach((country) => {
+    if (expectedSet.has(country)) score += 100;
+  });
+
+  // Exact ESPN id is useful when teams are still placeholders, but it should not beat
+  // a clear feeder-team match because ESPN/Firebase records have not been consistent.
+  const fixedIds = BRACKET_SLOT_EVENT_IDS[round] || [];
+  if (fixedIds[slotIndex] && espnEventId(match) === fixedIds[slotIndex]) score += 30;
+
+  // Prefer slots where all currently-known countries are plausible feeder winners.
+  if (countries.length && countries.every((country) => expectedSet.has(country))) score += 25;
+  if (countries.length && expected.length && countries.some((country) => expectedSet.has(country))) score += 15;
+
+  // If the slot has no known feeder countries yet, fall back to id/time assignment later.
+  if (!expected.length && !countries.length && fixedIds[slotIndex] && espnEventId(match) === fixedIds[slotIndex]) score += 20;
+
+  // Mild hint matching for placeholder-only ESPN rows.
+  const hints = BRACKET_SLOT_MATCH_HINTS[round]?.[slotIndex] || [];
+  score += countSlotHintMatches(match, hints) * 5;
+
+  return score;
+}
+
+function assignMatchesToDerivedRound(matches, round, previousSlots) {
+  const expected = BRACKET_ROUND_EXPECTED_COUNTS[round] || matches.length;
+  const slots = Array(expected).fill(null);
+  const used = new Set();
+  const candidates = [];
+
+  matches.forEach((match, matchIndex) => {
+    for (let slotIndex = 0; slotIndex < expected; slotIndex += 1) {
+      const score = scoreMatchForDerivedSlot(match, round, slotIndex, previousSlots);
+      if (score > 0) candidates.push({ matchIndex, slotIndex, score });
+    }
+  });
+
+  candidates
+    .sort((a, b) => b.score - a.score || a.slotIndex - b.slotIndex || a.matchIndex - b.matchIndex)
+    .forEach(({ matchIndex, slotIndex }) => {
+      if (used.has(matchIndex) || slots[slotIndex]) return;
+      slots[slotIndex] = matches[matchIndex];
+      used.add(matchIndex);
+    });
+
+  // Fill any still-empty slots with remaining matches in date order. This keeps the
+  // bracket populated without letting date order override known feeder relationships.
+  matches.forEach((match, matchIndex) => {
+    if (used.has(matchIndex)) return;
+    const openIndex = slots.findIndex((slot) => !slot);
+    if (openIndex >= 0) {
+      slots[openIndex] = match;
+      used.add(matchIndex);
+    }
+  });
+
+  return slots;
+}
+
 function buildBracketSlots(knockoutMatches) {
   const result = {};
-  BRACKET_ROUNDS.forEach((round) => {
-    const matches = sortBracketRoundMatches(knockoutMatches.filter((match) => effectiveKnockoutStage(match) === round), round);
-    const fixedIds = BRACKET_SLOT_EVENT_IDS[round] || [];
-    if (fixedIds.length) {
-      const remaining = [...matches];
-      result[round] = fixedIds.map((id, slotIndex) => takeBestBracketSlotMatch(remaining, round, slotIndex, id));
-      return;
-    }
-    result[round] = matches;
+  const grouped = Object.fromEntries(BRACKET_ROUNDS.map((round) => [round, sortBracketRoundMatches(knockoutMatches.filter((match) => effectiveKnockoutStage(match) === round), round)]));
+
+  const r32Remaining = [...(grouped["Round of 32"] || [])];
+  const r32FixedIds = BRACKET_SLOT_EVENT_IDS["Round of 32"] || [];
+  result["Round of 32"] = r32FixedIds.map((id, slotIndex) => takeBestBracketSlotMatch(r32Remaining, "Round of 32", slotIndex, id));
+  r32Remaining.forEach((match) => {
+    const openIndex = result["Round of 32"].findIndex((slot) => !slot);
+    if (openIndex >= 0) result["Round of 32"][openIndex] = match;
   });
+
+  for (let roundIndex = 1; roundIndex < BRACKET_ROUNDS.length; roundIndex += 1) {
+    const round = BRACKET_ROUNDS[roundIndex];
+    const previousRound = BRACKET_ROUNDS[roundIndex - 1];
+    result[round] = assignMatchesToDerivedRound(grouped[round] || [], round, result[previousRound] || []);
+  }
+
   return result;
 }
 
 function bracketFeedDisplayName(match, previousRound, previousSlotIndex) {
   const winner = match?.winnerCountry;
-  if (winner && isRealAppCountry(winner)) return winner;
+  if ((match?.statusType === "final" || match?.completed) && winner && isRealAppCountry(winner)) return winner;
   return `${previousRound} ${previousSlotIndex + 1} Winner`;
 }
 
-function shouldDeriveBracketParticipants(match) {
-  if (!match) return false;
-  const home = match.home || "";
-  const away = match.away || "";
-  if (home && away && home === away) return true;
-  return isBracketPlaceholderName(home) || isBracketPlaceholderName(away);
-}
-
 function displayMatchForBracketNode(node, matchesByRound) {
-  if (!node.match || node.roundIndex === 0 || !shouldDeriveBracketParticipants(node.match)) return node.match;
+  if (node.roundIndex === 0) return node.match;
+
   const previousRound = BRACKET_ROUNDS[node.roundIndex - 1];
   const previousSlots = matchesByRound[previousRound] || [];
   const firstPreviousIndex = node.slotIndex * 2;
   const firstFeeder = previousSlots[firstPreviousIndex] || null;
   const secondFeeder = previousSlots[firstPreviousIndex + 1] || null;
+  const home = bracketFeedDisplayName(firstFeeder, previousRound, firstPreviousIndex);
+  const away = bracketFeedDisplayName(secondFeeder, previousRound, firstPreviousIndex + 1);
+  const hasFeederData = firstFeeder || secondFeeder;
+
+  if (!node.match && !hasFeederData) return null;
+
   return {
-    ...node.match,
-    home: bracketFeedDisplayName(firstFeeder, previousRound, firstPreviousIndex),
-    away: bracketFeedDisplayName(secondFeeder, previousRound, firstPreviousIndex + 1)
+    ...(node.match || {}),
+    id: node.match?.id || `derived-${node.round}-${node.slotIndex}`,
+    stage: node.round,
+    statusType: node.match?.statusType || "not_started",
+    statusDisplay: node.match?.statusDisplay || "TBD",
+    home,
+    away,
+    homeScore: node.match?.homeScore,
+    awayScore: node.match?.awayScore,
+    dateTime: node.match?.dateTime,
+    displayDate: node.match?.displayDate,
+    time: node.match?.time,
+    venue: node.match?.venue || "Venue TBD",
+    winnerCountry: isRealAppCountry(node.match?.winnerCountry) ? node.match.winnerCountry : ""
   };
 }
 
@@ -2836,7 +2939,7 @@ function App() {
       {page === "scoring" && <ScoringLog scoringEventsObj={scoringEventsObj} matchesObj={matchesObj} />}
       {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
       {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} syncMetaObj={syncMetaObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
-      <div className="footer">v3G.11 Portfolio/ownership crash hotfix</div>
+      <div className="footer">v3G.12 True bracket feeder path fix</div>
     </div>
   );
 }
