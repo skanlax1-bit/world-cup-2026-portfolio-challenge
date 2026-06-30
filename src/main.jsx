@@ -236,26 +236,44 @@ const BRACKET_ROUND_EXPECTED_COUNTS = {
   "Semifinal": 2,
   "Final": 1
 };
-// Fixed ESPN knockout tree order. The Bracket tab must not sort knockout matches by kickoff time,
-// because that makes the connector lines imply the wrong future matchups. These IDs encode
-// which Round-of-32 matches feed each Round-of-16 slot.
 const ESPN_BRACKET_EVENT_ORDER = {
   "Round of 32": [
-    "53452541", "53452543",
-    "53452545", "53452547",
-    "53452549", "53452551",
-    "53452553", "53452555",
-    "53452557", "53452561",
-    "53452563", "53452565",
-    "53452503", "53452569",
-    "53452505", "53452507"
+    "53452541", "53452543", "53452545", "53452547",
+    "53452549", "53452551", "53452553", "53452555",
+    "53452557", "53452561", "53452563", "53452565",
+    "53452503", "53452569", "53452505", "53452507"
   ],
   "Round of 16": ["53452509", "53452511", "53452513", "53452515", "53452517", "53452519", "53452521", "53452523"]
 };
 
+
+// Display-only fallback hints for Firebase records whose stored ids do not exactly match the
+// ESPN bracket ids. This keeps the Bracket tab populated while nudging games into the intended
+// connected-tree order instead of pure kickoff-time order.
 const BRACKET_SLOT_EVENT_IDS = {
   "Round of 32": ESPN_BRACKET_EVENT_ORDER["Round of 32"],
   "Round of 16": ESPN_BRACKET_EVENT_ORDER["Round of 16"]
+};
+
+const BRACKET_SLOT_MATCH_HINTS = {
+  "Round of 32": [
+    ["Germany", "Paraguay", "Third Place Group A/B/C/D/F"],
+    ["France", "Sweden", "Group I Winner", "Third Place Group C/D/F/G/H"],
+    ["South Africa", "Canada"],
+    ["Netherlands", "Morocco", "Group F Winner"],
+    ["Brazil", "Japan", "Group F 2nd Place"],
+    ["Ivory Coast", "Norway", "Group E 2nd Place", "Group I 2nd Place"],
+    ["Mexico", "Third Place Group C/E/F/H/I"],
+    ["Group L Winner", "Third Place Group E/H/I/J/K"],
+    ["Group G Winner", "Third Place Group A/E/H/I/J"],
+    ["United States", "Third Place Group B/E/F/I/J"],
+    ["Group H Winner", "Group J 2nd Place"],
+    ["Group K 2nd Place", "Group L 2nd Place"],
+    ["Switzerland", "Third Place Group E/F/G/I/J"],
+    ["Group D 2nd Place", "Group G 2nd Place"],
+    ["Argentina", "Group H 2nd Place"],
+    ["Group K Winner", "Third Place Group D/E/I/J/L"]
+  ]
 };
 
 function eventSafeId(value) {
@@ -496,17 +514,64 @@ function sortBracketRoundMatches(matches, round) {
   });
 }
 
+
+function normalizedTeamToken(value) {
+  return String(normalizeBracketPlaceholderName(value) || value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function matchTextTokens(match) {
+  return normalizedTeamToken(`${match?.home || ""} ${match?.away || ""}`);
+}
+
+function countSlotHintMatches(match, hints = []) {
+  const text = matchTextTokens(match);
+  if (!text) return 0;
+  return hints.reduce((count, hint) => {
+    const token = normalizedTeamToken(hint);
+    if (!token) return count;
+    return count + (text.includes(token) ? 1 : 0);
+  }, 0);
+}
+
+function takeBestBracketSlotMatch(remaining, round, slotIndex, eventId) {
+  if (!remaining.length) return null;
+  const wantedId = String(eventId || "");
+  const idIndex = remaining.findIndex((match) => espnEventId(match) === wantedId);
+  if (idIndex >= 0) return remaining.splice(idIndex, 1)[0];
+
+  const hints = BRACKET_SLOT_MATCH_HINTS[round]?.[slotIndex] || [];
+  if (hints.length) {
+    let bestIndex = -1;
+    let bestScore = 0;
+    remaining.forEach((match, index) => {
+      const score = countSlotHintMatches(match, hints);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    });
+    if (bestIndex >= 0 && bestScore > 0) return remaining.splice(bestIndex, 1)[0];
+  }
+
+  return remaining.shift() || null;
+}
+
 function buildBracketSlots(knockoutMatches) {
   const result = {};
   BRACKET_ROUNDS.forEach((round) => {
-    const matches = knockoutMatches.filter((match) => effectiveKnockoutStage(match) === round);
+    const matches = sortBracketRoundMatches(knockoutMatches.filter((match) => effectiveKnockoutStage(match) === round), round);
     const fixedIds = BRACKET_SLOT_EVENT_IDS[round] || [];
     if (fixedIds.length) {
-      const byEventId = new Map(matches.map((match) => [espnEventId(match), match]));
-      result[round] = fixedIds.map((id) => byEventId.get(String(id)) || null);
+      const remaining = [...matches];
+      result[round] = fixedIds.map((id, slotIndex) => takeBestBracketSlotMatch(remaining, round, slotIndex, id));
       return;
     }
-    result[round] = sortBracketRoundMatches(matches, round);
+    result[round] = matches;
   });
   return result;
 }
@@ -525,10 +590,10 @@ function shouldDeriveBracketParticipants(match) {
   return isBracketPlaceholderName(home) || isBracketPlaceholderName(away);
 }
 
-function displayMatchForBracketNode(node, slotsByRound) {
+function displayMatchForBracketNode(node, matchesByRound) {
   if (!node.match || node.roundIndex === 0 || !shouldDeriveBracketParticipants(node.match)) return node.match;
   const previousRound = BRACKET_ROUNDS[node.roundIndex - 1];
-  const previousSlots = slotsByRound[previousRound] || [];
+  const previousSlots = matchesByRound[previousRound] || [];
   const firstPreviousIndex = node.slotIndex * 2;
   const firstFeeder = previousSlots[firstPreviousIndex] || null;
   const secondFeeder = previousSlots[firstPreviousIndex + 1] || null;
@@ -1623,7 +1688,7 @@ function BracketMatchCard({ match, participants, lots, colorMap }) {
   );
 }
 
-function buildBracketLayout(slotsByRound) {
+function buildBracketLayout(matchesByRound) {
   const roundWidth = BRACKET_CARD_WIDTH + BRACKET_COLUMN_GAP;
   const rows = [];
   const nodes = [];
@@ -1633,7 +1698,7 @@ function buildBracketLayout(slotsByRound) {
 
   BRACKET_ROUNDS.forEach((round, roundIndex) => {
     const expected = BRACKET_ROUND_EXPECTED_COUNTS[round];
-    const roundMatches = slotsByRound[round] || [];
+    const roundMatches = matchesByRound[round] || [];
     const stride = Math.pow(2, roundIndex);
     const offset = (stride - 1) / 2;
     const left = roundIndex * roundWidth;
@@ -1690,8 +1755,8 @@ function BracketRoundJump({ rows }) {
   );
 }
 
-function BracketSlotCard({ node, participants, lots, colorMap, slotsByRound }) {
-  const displayMatch = displayMatchForBracketNode(node, slotsByRound);
+function BracketSlotCard({ node, participants, lots, colorMap, matchesByRound }) {
+  const displayMatch = displayMatchForBracketNode(node, matchesByRound);
   if (displayMatch) {
     return <BracketMatchCard match={displayMatch} participants={participants} lots={lots} colorMap={colorMap} />;
   }
@@ -1715,8 +1780,8 @@ function Bracket({ participantsObj, scheduleObj, creditAdjustmentsObj, matchesOb
   const colorMap = useMemo(() => stableParticipantColorMap(participants), [participants]);
   const matches = useMemo(() => getActiveMatches(matchesObj), [matchesObj]);
   const knockoutMatches = useMemo(() => sortKnockoutMatches(matches.filter((m) => isKnockoutStage(m))), [matches]);
-  const slotsByRound = useMemo(() => buildBracketSlots(knockoutMatches), [knockoutMatches]);
-  const bracketLayout = useMemo(() => buildBracketLayout(slotsByRound), [slotsByRound]);
+  const matchesByRound = useMemo(() => buildBracketSlots(knockoutMatches), [knockoutMatches]);
+  const bracketLayout = useMemo(() => buildBracketLayout(matchesByRound), [matchesByRound]);
   const knownTeamCount = knockoutMatches.reduce((sum, match) => sum + getMatchCountries(match).length, 0);
   const lastSyncAt = Number(syncMetaObj?.lastMatchSyncAt || syncMetaObj?.lastScheduleSyncAt || 0);
 
@@ -1773,7 +1838,7 @@ function Bracket({ participantsObj, scheduleObj, creditAdjustmentsObj, matchesOb
                   className={`bracket-tree-node bracket-tree-node-${node.roundIndex}`}
                   style={{ left: node.left, top: node.top, width: node.width, height: node.height }}
                 >
-                  <BracketSlotCard node={node} participants={participants} lots={lots} colorMap={colorMap} slotsByRound={slotsByRound} />
+                  <BracketSlotCard node={node} participants={participants} lots={lots} colorMap={colorMap} matchesByRound={matchesByRound} />
                 </div>
               ))}
             </div>
@@ -1815,6 +1880,137 @@ function Leaderboard({ participantsObj, scheduleObj, creditAdjustmentsObj, scori
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function Portfolio({ user, participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj }) {
+  const { participants } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj), [participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj]);
+  const visibleParticipants = participants.filter((p) => p.id !== "admin");
+  const defaultParticipantId = user?.id === "admin" ? (visibleParticipants[0]?.id || "") : user?.id;
+  const [selectedParticipantId, setSelectedParticipantId] = useState(defaultParticipantId || "");
+
+  useEffect(() => {
+    if (!selectedParticipantId && defaultParticipantId) setSelectedParticipantId(defaultParticipantId);
+  }, [defaultParticipantId, selectedParticipantId]);
+
+  const selected = participants.find((p) => p.id === selectedParticipantId) || visibleParticipants[0] || { name: "—", holdings: [], points: 0, profit: 0, remaining: STARTING_CREDITS, auctionSpent: 0, tradeCreditNet: 0 };
+  const holdings = [...(selected.holdings || [])]
+    .filter((holding) => holding && holding.country)
+    .sort((a, b) => Number(b.ownerPoints || 0) - Number(a.ownerPoints || 0) || String(a.country || "").localeCompare(String(b.country || "")));
+  const totalShare = holdings.reduce((sum, holding) => sum + Number(holding.share || 0), 0);
+
+  return (
+    <div className="container grid">
+      <div className="card page-title">
+        <p className="eyebrow">Participant portfolios</p>
+        <h2>Portfolios</h2>
+        <p className="muted">Country shares, owner points, credits, and profit by participant. This view is defensive against malformed scoring rows so one bad ledger entry cannot blank the page.</p>
+      </div>
+
+      <div className="card">
+        <div className="space top-wrap">
+          <div>
+            <h3>{selected.name}</h3>
+            <p className="muted small-text">Profit = points earned + remaining credits − 45.</p>
+          </div>
+          <select value={selected.id || selectedParticipantId} onChange={(e) => setSelectedParticipantId(e.target.value)}>
+            {visibleParticipants.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="stat-grid">
+          <StatCard label="Profit" value={money(selected.profit)} sub="Points + credits − 45" tone={Number(selected.profit || 0) >= 0 ? "positive" : "negative"} />
+          <StatCard label="Points" value={money(selected.points)} sub="Allocated scoring points" />
+          <StatCard label="Remaining" value={money(selected.remaining)} sub="Current credits" />
+          <StatCard label="Holdings" value={holdings.length} sub={`${money(totalShare)}% total country exposure`} />
+        </div>
+      </div>
+
+      <div className="card table-card">
+        <div className="space top-wrap"><h3>Holdings</h3><span className="badge neutral">{holdings.length}</span></div>
+        {holdings.length ? (
+          <>
+            <table className="desktop-table">
+              <thead><tr><th>Country</th><th>Share</th><th>Country Points</th><th>Your Points</th><th>Auction Cost</th></tr></thead>
+              <tbody>
+                {holdings.map((holding) => (
+                  <tr key={`${holding.id}-${holding.country}`}>
+                    <td><b>{holding.country}</b></td>
+                    <td>{money(holding.share)}%</td>
+                    <td>{money(holding.points)}</td>
+                    <td><b>{money(holding.ownerPoints)}</b></td>
+                    <td>{money(holding.ownerCost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mobile-cards portfolio-card-grid">
+              {holdings.map((holding) => (
+                <div className="portfolio-card" key={`${holding.id}-${holding.country}-card`}>
+                  <div className="space"><b>{holding.country}</b><span className="badge neutral">{money(holding.share)}%</span></div>
+                  <div className="mini-grid">
+                    <span>Country Points</span><b>{money(holding.points)}</b>
+                    <span>Your Points</span><b>{money(holding.ownerPoints)}</b>
+                    <span>Auction Cost</span><b>{money(holding.ownerCost)}</b>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : <p className="muted">No holdings found for this participant.</p>}
+      </div>
+    </div>
+  );
+}
+
+function CountryOwnership({ participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj }) {
+  const { participants, lots } = useMemo(() => deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj), [participantsObj, scheduleObj, creditAdjustmentsObj, scoringEventsObj]);
+  const colorMap = useMemo(() => stableParticipantColorMap(participants), [participants]);
+  const soldLots = lots
+    .filter((lot) => lot?.status === "sold" && lot?.country)
+    .sort((a, b) => String(a.country || "").localeCompare(String(b.country || "")));
+  const ownershipRows = soldLots.map((lot) => {
+    const entries = ownershipEntriesForCountry(lot.country, participants, lots, colorMap);
+    const totalShare = entries.reduce((sum, entry) => sum + Number(entry.share || 0), 0);
+    return { lot, entries, totalShare };
+  });
+  const shareWarnings = ownershipRows.filter((row) => Math.abs(Number(row.totalShare || 0) - 100) > 0.01);
+
+  return (
+    <div className="container grid">
+      <div className="card page-title">
+        <p className="eyebrow">Country ownership</p>
+        <h2>Ownership</h2>
+        <p className="muted">Current owner splits by country. Participant colors match the bracket ownership wheels.</p>
+      </div>
+
+      {shareWarnings.length > 0 && (
+        <div className="card warning-card">
+          <h3><AlertTriangle size={18}/> Ownership audit warning</h3>
+          <p className="muted">These countries do not currently total 100% ownership: {shareWarnings.map((row) => `${row.lot.country} (${money(row.totalShare)}%)`).join(", ")}.</p>
+        </div>
+      )}
+
+      <div className="ownership-grid">
+        {ownershipRows.map(({ lot, entries, totalShare }) => (
+          <div className="mini-card" key={lot.id || lot.country}>
+            <div className="space top-wrap">
+              <div>
+                <b>{lot.country}</b>
+                <small>{money(Number(lot.totalPoints || lot.points || 0))} total points · {money(totalShare)}% owned</small>
+              </div>
+              <OwnershipWheel country={lot.country} participants={participants} lots={lots} colorMap={colorMap} />
+            </div>
+            {entries.length ? entries.map((entry) => (
+              <div className="ownership-line" key={`${lot.id}-${entry.participantId}`}>
+                <span><i style={{ background: entry.color }} /> {entry.name}</span>
+                <b>{money(entry.share)}%</b>
+              </div>
+            )) : <p className="muted small-text">No current ownership found.</p>}
+          </div>
+        ))}
+        {!ownershipRows.length && <div className="card"><p className="muted">No sold countries found yet.</p></div>}
       </div>
     </div>
   );
@@ -2640,7 +2836,7 @@ function App() {
       {page === "scoring" && <ScoringLog scoringEventsObj={scoringEventsObj} matchesObj={matchesObj} />}
       {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
       {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} syncMetaObj={syncMetaObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
-      <div className="footer">v3G.7 Bracket placeholder/team mapping fix</div>
+      <div className="footer">v3G.11 Portfolio/ownership crash hotfix</div>
     </div>
   );
 }
