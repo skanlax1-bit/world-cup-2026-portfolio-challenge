@@ -1,16 +1,16 @@
-# World Cup 2026 Portfolio Challenge — v3G.11 Bracket Recovery + Safe Path Ordering
+# World Cup 2026 Portfolio Challenge — v3G.12 True Bracket Feeder Path Fix
 
-Focused recovery patch after v3G.10 made the Bracket tab show empty TBD slots.
+Focused recovery patch for the Bracket tab.
 
 ## Fixes
 
-- Restores the Bracket tab from the last working source that included Portfolio and Ownership components.
-- Keeps the Portfolio/Ownership crash hotfix.
-- Prevents the bracket from going blank when ESPN/Firebase match ids do not match the strict bracket-slot map.
-- Uses safe fallback matching by actual teams and placeholders so real knockout matches remain visible.
-- Nudges Round-of-32 games toward ESPN-style connected bracket order instead of pure kickoff-time order when possible.
-- Keeps ownership wheels and unique colors.
-- Does not change scoring, trades, profit, Firebase config, ESPN API code, or match refresh logic.
+- Stops later-round cards from showing the same matchup in multiple places, such as Canada/Morocco appearing twice.
+- Makes later-round bracket cards derive their displayed participants from the two feeder matches connected by the bracket lines.
+- Keeps actual match metadata from ESPN/Firebase where available: date, time, venue, status, scores, and final result state.
+- Keeps Round-of-32 cards visible and ordered in the connected bracket tree.
+- Keeps the Portfolio/Ownership crash fix from v3G.9+.
+- Keeps ownership wheels and participant colors.
+- Does not change scoring logic, trade logic, profit logic, Firebase config, or ESPN API sync.
 
 ## Upload these files
 
@@ -24,4 +24,4 @@ Do not replace:
 - `src/matches.js`
 - `api/espn-schedule.js`
 
-After deploying, check the Bracket tab first. You can then run **Refresh ESPN Match Data** once from the Matches tab.
+After deploying, check the Bracket tab. A match in a later round should show the winners/placeholder winners from the two connected feeder games, not whichever matchup happens to be first by kickoff time.
