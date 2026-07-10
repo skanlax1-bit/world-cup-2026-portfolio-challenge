@@ -2324,9 +2324,14 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
   }
 
   async function approveTrade(trade) {
-    const validationError = validateTrade(trade, participants, lots, lockedCountryNames);
+    // Admin approval must be able to resolve already-accepted trades even when
+    // a final match has temporarily suspended new trading for that country.
+    // Otherwise scoring and trade approval can deadlock: scoring waits for the
+    // accepted trade, while the accepted trade is blocked by pending scoring.
+    // New proposals/acceptances still use lockedCountryNames above.
+    const validationError = validateTrade(trade, participants, lots, new Set());
     if (validationError) return alert(`Trade cannot be approved: ${validationError}`);
-    if (!confirm(`Approve this trade?\n\n${summarizeTrade(trade, participants, lots)}`)) return;
+    if (!confirm(`Approve this trade?\n\n${summarizeTrade(trade, participants, lots)}\n\nNote: admin approval is allowed for already-accepted trades even if a related match is pending scoring.`)) return;
 
     const updates = buildTradeExecutionUpdates(trade, lots, user.id);
     await update(leagueRoot(), collapseFirebaseUpdateConflicts(updates));
@@ -2939,7 +2944,7 @@ function App() {
       {page === "scoring" && <ScoringLog scoringEventsObj={scoringEventsObj} matchesObj={matchesObj} />}
       {page === "trading" && <Trading user={user} isAdmin={isAdmin} participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
       {page === "admin" && isAdmin && <Admin participantsObj={participantsObj} scheduleObj={scheduleObj} creditAdjustmentsObj={creditAdjustmentsObj} tradesObj={tradesObj} settingsObj={settingsObj} syncMetaObj={syncMetaObj} matchesObj={matchesObj} scoringEventsObj={scoringEventsObj} />}
-      <div className="footer">v3G.12 True bracket feeder path fix</div>
+      <div className="footer">v3G.13 trade approval scoring deadlock fix</div>
     </div>
   );
 }
