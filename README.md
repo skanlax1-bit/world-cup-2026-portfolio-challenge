@@ -1,27 +1,19 @@
-# World Cup 2026 Portfolio Challenge — v3G.12 True Bracket Feeder Path Fix
+# World Cup 2026 Portfolio Challenge — v3G.13 Trade Approval Scoring Deadlock Fix
 
-Focused recovery patch for the Bracket tab.
+Focused hotfix after v3G.12.
 
-## Fixes
+## Fix
 
-- Stops later-round cards from showing the same matchup in multiple places, such as Canada/Morocco appearing twice.
-- Makes later-round bracket cards derive their displayed participants from the two feeder matches connected by the bracket lines.
-- Keeps actual match metadata from ESPN/Firebase where available: date, time, venue, status, scores, and final result state.
-- Keeps Round-of-32 cards visible and ordered in the connected bracket tree.
-- Keeps the Portfolio/Ownership crash fix from v3G.9+.
-- Keeps ownership wheels and participant colors.
-- Does not change scoring logic, trade logic, profit logic, Firebase config, or ESPN API sync.
+- Allows commissioner/admin approval of already-accepted trades even if one of the involved countries is temporarily trading-suspended because final match scoring is pending.
+- Keeps the trading suspension for new proposals and participant acceptance while scoring is pending.
+- Fixes the circular lock where match scoring waits for an accepted trade to be resolved, but the accepted trade cannot be approved because match scoring is pending.
+- Does not change scoring logic, profit logic, ESPN sync logic, or bracket logic.
 
 ## Upload these files
 
 - `README.md`
 - `src/main.jsx`
-- `src/styles.css`
 
-Do not replace:
+Do not replace `src/firebase.js`, `src/matches.js`, `api/espn-schedule.js`, or other files.
 
-- `src/firebase.js`
-- `src/matches.js`
-- `api/espn-schedule.js`
-
-After deploying, check the Bracket tab. A match in a later round should show the winners/placeholder winners from the two connected feeder games, not whichever matchup happens to be first by kickoff time.
+After deploying, go to Trading → Admin approval and approve or reject the accepted trade. Then return to Admin → Pending match scoring and run Try score now for the match.
