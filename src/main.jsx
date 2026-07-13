@@ -1088,6 +1088,14 @@ function deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj = {}, sc
 
     if (lot.status !== "sold") return;
 
+    // Auction spend is a fixed historical cost paid by the auction winner.
+    // It must NOT disappear when that winner later sells some or all of the country.
+    // Leaderboard cash/net-credit math should be:
+    //   net credits = 45 - fixed auction spend + net trade/manual credits
+    //   profit = points + net credits - 45
+    const auctionWinner = byId[lot.winningParticipantId];
+    if (auctionWinner) auctionWinner.auctionSpent += Number(lot.finalPrice || 0);
+
     const shares = getLotShares(lot);
     Object.entries(shares).forEach(([participantId, share]) => {
       const participant = byId[participantId];
@@ -1097,7 +1105,6 @@ function deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj = {}, sc
       const historicalPoints = Number(participant.historicalPointsByCountry[lot.country] || 0);
       const points = legacyPoints + historicalPoints;
       const auctionCost = lot.winningParticipantId === participantId ? Number(lot.finalPrice || 0) : 0;
-      participant.auctionSpent += auctionCost;
       participant.points += legacyPoints;
       participant.holdings.push({ ...lot, points: totalCountryPoints, share: Number(share), ownerPoints: points, ownerCost: auctionCost });
     });
@@ -1110,11 +1117,12 @@ function deriveStats(participantsObj, scheduleObj, creditAdjustmentsObj = {}, sc
   });
 
   participants.forEach((p) => {
+    // Current/net credits after fixed auction spend and all trade/manual credit movements.
+    // This is the single source of truth for leaderboard profit.
     p.remaining = Number(p.startingCredits ?? STARTING_CREDITS) - Number(p.auctionSpent || 0) + Number(p.tradeCreditNet || 0);
-    p.spent = Number(p.startingCredits ?? STARTING_CREDITS) - Number(p.remaining || 0);
-    // Cash-balance profit model: credits are cash. This equals Points - Net Spent for normal auction/trade activity,
-    // but prevents circular credit transfers from manufacturing fake profit.
-    p.profit = Number(p.points || 0) + Number(p.remaining || 0) - Number(p.startingCredits ?? STARTING_CREDITS);
+    p.netCredits = p.remaining;
+    p.spent = Number(p.startingCredits ?? STARTING_CREDITS) - Number(p.netCredits || 0);
+    p.profit = Number(p.points || 0) + Number(p.netCredits || 0) - Number(p.startingCredits ?? STARTING_CREDITS);
   });
 
   return { participants, lots, creditAdjustments, activeEvents };
@@ -1178,7 +1186,7 @@ function Login({ onLogin, participantsObj }) {
         <div className="welcome-summary compact-summary">
           <h3>How it works</h3>
           <p>Participants use fictional credits to buy World Cup countries in a live auction. Countries earn points from their actual World Cup performance. The winner is the participant with the highest profit.</p>
-          <p><b>Profit = Points Earned + Remaining Credits − 45.</b> Credits are treated like cash, so unused credits still count and circular credit transfers cannot create fake profit.</p>
+          <p><b>Profit = Points Earned + net credits − 45.</b> Credits are treated like cash, so unused credits still count and circular credit transfers cannot create fake profit.</p>
         </div>
       </div>
     </div>
@@ -1271,7 +1279,7 @@ function Welcome({ participantsObj, scheduleObj, creditAdjustmentsObj, matchesOb
           <h3>Rules & scoring</h3>
           <details open>
             <summary>Core format</summary>
-            <p className="muted">Each participant started with 45 credits. Profit = points earned + remaining credits − 45. Credits are treated like cash, so unused credits still count toward profit.</p>
+            <p className="muted">Each participant started with 45 credits. Profit = points earned + net credits − 45. Credits are treated like cash, so unused credits still count toward profit.</p>
           </details>
           <details>
             <summary>Scoring table</summary>
@@ -1968,18 +1976,18 @@ function Leaderboard({ participantsObj, scheduleObj, creditAdjustmentsObj, scori
       <div className="card page-title">
         <p className="eyebrow">Standings · {sorted.length} participants</p>
         <h2>Leaderboard</h2>
-        <p className="muted">Profit = points earned + remaining credits − 45. Credits are treated like cash; unused credits retain value and circular credit transfers do not create profit. Commissioner admin is excluded from rankings.</p>
+        <p className="muted">Profit = points earned + net credits − 45. Credits are treated like cash; net credits retain value and circular credit transfers do not create profit. Commissioner admin is excluded from rankings.</p>
       </div>
       <div className="card table-card">
         <table className="desktop-table">
-          <thead><tr><th>Rank</th><th>Participant</th><th>Profit</th><th>Points</th><th>Net Spent</th><th>Auction Spend</th><th>Trade Credits</th><th>Remaining</th><th>Holdings</th></tr></thead>
-          <tbody>{sorted.map((p, i) => <tr key={p.id} className={i === 0 ? "leader-row" : ""}><td><span className={i === 0 ? "rank-pill leader" : "rank-pill"}>{i + 1}</span></td><td><b>{p.name}</b>{i === 0 && <span className="badge gold">Leader</span>}</td><td><b className={p.profit >= 0 ? "profit-positive" : "profit-negative"}>{money(p.profit)}</b></td><td>{money(p.points)}</td><td>{money(p.spent)}</td><td>{money(p.auctionSpent)}</td><td>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</td><td>{money(p.remaining)}</td><td>{p.holdings.length}</td></tr>)}</tbody>
+          <thead><tr><th>Rank</th><th>Participant</th><th>Profit</th><th>Points</th><th>Net Spent</th><th>Auction Spend</th><th>Trade Credits</th><th>Net Credits</th><th>Holdings</th></tr></thead>
+          <tbody>{sorted.map((p, i) => <tr key={p.id} className={i === 0 ? "leader-row" : ""}><td><span className={i === 0 ? "rank-pill leader" : "rank-pill"}>{i + 1}</span></td><td><b>{p.name}</b>{i === 0 && <span className="badge gold">Leader</span>}</td><td><b className={p.profit >= 0 ? "profit-positive" : "profit-negative"}>{money(p.profit)}</b></td><td>{money(p.points)}</td><td>{money(p.spent)}</td><td>{money(p.auctionSpent)}</td><td>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</td><td>{money(p.netCredits ?? p.remaining)}</td><td>{p.holdings.length}</td></tr>)}</tbody>
         </table>
         <div className="mobile-cards leaderboard-cards">
           {sorted.map((p, i) => (
             <div className="mini-card" key={p.id}>
               <div className="space"><b>#{i + 1} {p.name}</b><span className={`badge ${p.profit >= 0 ? "positive" : "negative"}`}>Profit {money(p.profit)}</span></div>
-              <div className="mini-grid"><span>Points</span><b>{money(p.points)}</b><span>Net Spent</span><b>{money(p.spent)}</b><span>Auction Spend</span><b>{money(p.auctionSpent)}</b><span>Trade Credits</span><b>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</b><span>Remaining</span><b>{money(p.remaining)}</b><span>Holdings</span><b>{p.holdings.length}</b></div>
+              <div className="mini-grid"><span>Points</span><b>{money(p.points)}</b><span>Net Spent</span><b>{money(p.spent)}</b><span>Auction Spend</span><b>{money(p.auctionSpent)}</b><span>Trade Credits</span><b>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</b><span>Net Credits</span><b>{money(p.netCredits ?? p.remaining)}</b><span>Holdings</span><b>{p.holdings.length}</b></div>
             </div>
           ))}
         </div>
@@ -2016,16 +2024,16 @@ function Portfolio({ user, participantsObj, scheduleObj, creditAdjustmentsObj, s
         <div className="space top-wrap">
           <div>
             <h3>{selected.name}</h3>
-            <p className="muted small-text">Profit = points earned + remaining credits − 45.</p>
+            <p className="muted small-text">Profit = points earned + net credits − 45.</p>
           </div>
           <select value={selected.id || selectedParticipantId} onChange={(e) => setSelectedParticipantId(e.target.value)}>
             {visibleParticipants.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
         <div className="stat-grid">
-          <StatCard label="Profit" value={money(selected.profit)} sub="Points + credits − 45" tone={Number(selected.profit || 0) >= 0 ? "positive" : "negative"} />
+          <StatCard label="Profit" value={money(selected.profit)} sub="Points + net credits − 45" tone={Number(selected.profit || 0) >= 0 ? "positive" : "negative"} />
           <StatCard label="Points" value={money(selected.points)} sub="Allocated scoring points" />
-          <StatCard label="Remaining" value={money(selected.remaining)} sub="Current credits" />
+          <StatCard label="Net Credits" value={money(selected.netCredits ?? selected.remaining)} sub="Current credit balance" />
           <StatCard label="Holdings" value={holdings.length} sub={`${money(totalShare)}% total country exposure`} />
         </div>
       </div>
@@ -2372,7 +2380,7 @@ function Trading({ user, isAdmin, participantsObj, scheduleObj, creditAdjustment
         <div className="rules-grid">
           <p><b>Country shares:</b> Countries can be traded in whole-number increments of 1%. You cannot send more of a country than you currently own.</p>
           <p><b>Credits after the auction:</b> Credits are trading cash. They remain valuable because profit now includes remaining credits.</p>
-          <p><b>Profit formula:</b> Profit = points earned + remaining credits − 45. Credits may only move one way in a trade, and credit-only trades are blocked.</p>
+          <p><b>Profit formula:</b> Profit = points earned + net credits − 45. Credits may only move one way in a trade, and credit-only trades are blocked.</p>
           <p><b>Approval:</b> Proposed trades go to the other participant’s inbox. If accepted, admin must approve before shares or credits move.</p>
         </div>
       </div>
@@ -2869,8 +2877,8 @@ function Admin({ participantsObj, scheduleObj, creditAdjustmentsObj, tradesObj, 
         <div className="card table-card">
           <div className="space"><h2>Participants</h2><span className="badge neutral"><Users size={13}/> {participants.length}</span></div>
           <table className="desktop-table">
-            <thead><tr><th>Name</th><th>Role</th><th>Auction Spend</th><th>Trade Credits</th><th>Remaining</th><th>Action</th></tr></thead>
-            <tbody>{participants.map((p) => <tr key={p.id}><td>{p.name}</td><td>{p.role || "participant"}</td><td>{money(p.auctionSpent)}</td><td>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</td><td>{money(p.remaining)}</td><td>{p.id === "admin" ? <span className="muted">—</span> : <button className="danger small" onClick={() => removeParticipant(p)}>Remove</button>}</td></tr>)}</tbody>
+            <thead><tr><th>Name</th><th>Role</th><th>Auction Spend</th><th>Trade Credits</th><th>Net Credits</th><th>Action</th></tr></thead>
+            <tbody>{participants.map((p) => <tr key={p.id}><td>{p.name}</td><td>{p.role || "participant"}</td><td>{money(p.auctionSpent)}</td><td>{p.tradeCreditNet >= 0 ? "+" : ""}{money(p.tradeCreditNet)}</td><td>{money(p.netCredits ?? p.remaining)}</td><td>{p.id === "admin" ? <span className="muted">—</span> : <button className="danger small" onClick={() => removeParticipant(p)}>Remove</button>}</td></tr>)}</tbody>
           </table>
         </div>
 
